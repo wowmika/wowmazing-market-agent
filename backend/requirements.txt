@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+openai
+python-dotenv
+yfinance
+pandas
+numpy
+
+smartapi-python
+pyotp
+logzero
+websocket-client
+pycryptodome
