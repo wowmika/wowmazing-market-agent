@@ -20,6 +20,7 @@ import LearningCenter from "./LearningCenter";
 
 import "./App.css";
 import "./responsive.css";
+import { API_BASE_URL } from "./config";
 
 
 // ============================================================
@@ -308,7 +309,7 @@ function App() {
 
           const response =
             await fetch(
-              `http://127.0.0.1:8000/strategy/evidence?symbol=${encodeURIComponent(
+              `${API_BASE_URL}/strategy/evidence?symbol=${encodeURIComponent(
                 strategySymbol,
               )}&timeframe=${encodeURIComponent(
                 timeframe,
@@ -473,7 +474,7 @@ function App() {
 
       const response =
         await fetch(
-          "http://127.0.0.1:8000/agent",
+          `${API_BASE_URL}/agent`,
           {
             method: "POST",
 

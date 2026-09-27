@@ -1,3 +1,4 @@
+import { API_BASE_URL } from "../config";
 import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
@@ -171,13 +172,9 @@ export default function TradingChart({
           );
 
         const url =
-          `http://127.0.0.1:8000/market` +
-          `?symbol=${encodeURIComponent(
-            apiSymbol,
-          )}` +
-          `&timeframe=${encodeURIComponent(
-            timeframe,
-          )}`;
+  `${API_BASE_URL}/market` +
+  `?symbol=${encodeURIComponent(apiSymbol)}` +
+  `&timeframe=${encodeURIComponent(timeframe)}`;
 
         const response =
           await fetch(url);

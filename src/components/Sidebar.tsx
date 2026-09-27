@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { API_BASE_URL } from "../config";
 
 type SidebarProps = {
   symbol: string;
@@ -69,7 +70,7 @@ const groups = [
   { title: "VOLUME", items: ["Volume", "OBV", "MFI"] },
 ];
 
-const API_BASE = "http://127.0.0.1:8000";
+
 
 function formatPrice(price: number): string {
   return price.toLocaleString("en-IN", {
@@ -116,7 +117,7 @@ export default function Sidebar({
 
     try {
       const response = await fetch(
-        `${API_BASE}/instrument/search?q=${encodeURIComponent(
+        `${API_BASE_URL}/instrument/search?q=${encodeURIComponent(
           value,
         )}&market=${encodeURIComponent(searchMarket)}`,
       );
@@ -180,7 +181,7 @@ export default function Sidebar({
 
     const loadWatchlist = async () => {
       try {
-        const response = await fetch(`${API_BASE}/watchlist`);
+        const response = await fetch(`${API_BASE_URL}/watchlist`);
 
         if (!response.ok) {
           throw new Error(`Watchlist request failed with HTTP ${response.status}.`);
