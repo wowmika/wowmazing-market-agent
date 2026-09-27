@@ -313,6 +313,8 @@ function App() {
                 strategySymbol,
               )}&timeframe=${encodeURIComponent(
                 timeframe,
+              )}&market=${encodeURIComponent(
+                instrumentMeta.market,
               )}`,
             );
 
@@ -487,6 +489,7 @@ function App() {
               command: cleanCommand,
               symbol: apiSymbol,
               timeframe,
+              market: instrumentMeta.market,
             }),
           },
         );
@@ -966,6 +969,7 @@ function App() {
             <TradingChart
               symbol={symbol}
               timeframe={timeframe}
+              market={instrumentMeta.market}
               showEMA20={
                 indicators["EMA 20"]
               }

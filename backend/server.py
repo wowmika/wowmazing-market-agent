@@ -162,6 +162,7 @@ class AgentRequest(BaseModel):
     command: str
     symbol: str = "RELIANCE.NS"
     timeframe: str = "15m"
+    market: str = "INDIA"
 
 
 class AgentResponse(BaseModel):
@@ -391,22 +392,26 @@ def normalize_yfinance_symbol(
 
 def yfinance_symbol_candidates(
     symbol: str,
+    market: str = "INDIA",
 ) -> list[str]:
-    """Return ordered Yahoo Finance candidates.
+    """Return ordered Yahoo Finance candidates for the selected market.
 
-    Plain Indian tickers prefer NSE first, then a global symbol.
-    Explicit exchange/global suffixes are preserved.
+    GLOBAL explicitly uses the exact Yahoo symbol and never tries an
+    NSE .NS variant first. This prevents AAPL from resolving to AAPL.NS.
     """
 
     normalized = normalize_yfinance_symbol(
         symbol
     )
 
-    # Explicit Yahoo/index symbols.
+    selected_market = market.strip().upper()
+
     if normalized.startswith("^"):
         return [normalized]
 
-    # BSE/NSE symbols are already explicit.
+    if selected_market == "GLOBAL":
+        return [normalized]
+
     if normalized.endswith(".BO"):
         return [normalized]
 
@@ -414,13 +419,9 @@ def yfinance_symbol_candidates(
         base = normalized[:-3]
         return [normalized, base]
 
-    # Other exchange-qualified global symbols such as AAPL, SAP.DE,
-    # 7203.T or 0700.HK should remain usable.
     if "." in normalized:
         return [normalized]
 
-    # Preserve existing WOWMAZING behavior for Indian names while
-    # allowing fallback to a global Yahoo symbol.
     return [
         f"{normalized}.NS",
         normalized,
@@ -430,15 +431,21 @@ def yfinance_symbol_candidates(
 def download_yfinance_market_data(
     symbol: str,
     timeframe: str,
-) -> pd.DataFrame:
+    market: str = "INDIA",
+) -> tuple[pd.DataFrame, str]:
 
     config = get_timeframe_config(
         timeframe
     )
 
+    candidates = yfinance_symbol_candidates(
+        symbol,
+        market,
+    )
+
     last_error: Exception | None = None
 
-    for yf_symbol in yfinance_symbol_candidates(symbol):
+    for yf_symbol in candidates:
         try:
             data = yf.download(
                 yf_symbol,
@@ -453,7 +460,7 @@ def download_yfinance_market_data(
             )
 
             if len(data) >= 60:
-                return data
+                return data, yf_symbol
 
         except Exception as error:
             last_error = error
@@ -467,8 +474,52 @@ def download_yfinance_market_data(
     raise ValueError(
         "Not enough historical data from "
         f"the yfinance fallback for '{symbol}'. "
+        f"Tried: {', '.join(candidates)}. "
         f"Details: {detail}"
     )
+
+
+def infer_yfinance_currency(
+    symbol: str,
+    exchange: str = "",
+) -> str:
+    """Best-effort currency when Yahoo omits currency in search results."""
+
+    normalized = symbol.strip().upper()
+    exchange_upper = exchange.strip().upper()
+
+    suffix_currency = {
+        ".TO": "CAD",
+        ".V": "CAD",
+        ".L": "GBP",
+        ".DE": "EUR",
+        ".PA": "EUR",
+        ".MI": "EUR",
+        ".AS": "EUR",
+        ".T": "JPY",
+        ".HK": "HKD",
+        ".SI": "SGD",
+        ".AX": "AUD",
+        ".NS": "INR",
+        ".BO": "INR",
+    }
+
+    for suffix, currency in suffix_currency.items():
+        if normalized.endswith(suffix):
+            return currency
+
+    if exchange_upper in {
+        "NASDAQ",
+        "NYSE",
+        "NYSEARCA",
+        "NYSE ARCA",
+        "AMEX",
+        "BATS",
+        "CBOE",
+    }:
+        return "USD"
+
+    return ""
 
 
 # ============================================================
@@ -478,6 +529,7 @@ def download_yfinance_market_data(
 def download_market_data(
     symbol: str,
     timeframe: str,
+    market: str = "INDIA",
 ) -> tuple[
     pd.DataFrame,
     dict[str, Any],
@@ -488,132 +540,117 @@ def download_market_data(
         symbol
     )
 
-    if timeframe not in SUPPORTED_TIMEFRAMES:
+    selected_market = market.strip().upper()
 
+    if selected_market not in {
+        "INDIA",
+        "GLOBAL",
+        "INDEX",
+    }:
+        raise ValueError(
+            "market must be INDIA, GLOBAL or INDEX."
+        )
+
+    if timeframe not in SUPPORTED_TIMEFRAMES:
         raise ValueError(
             f"Unsupported timeframe: {timeframe}"
         )
 
     # --------------------------------------------------------
-    # PRIMARY: UPSTOX
+    # PRIMARY: UPSTOX FOR INDIA / INDEX ONLY
     # --------------------------------------------------------
 
-    if MARKET_DATA_PROVIDER != "yfinance":
-
+    if (
+        selected_market in {"INDIA", "INDEX"}
+        and MARKET_DATA_PROVIDER != "yfinance"
+    ):
         try:
+            provider = get_upstox_provider()
+            instrument = provider.resolve_instrument(symbol)
 
-            provider = (
-                get_upstox_provider()
+            candles = provider.get_candles(
+                instrument["instrument_key"],
+                timeframe,
             )
 
-            instrument = (
-                provider.resolve_instrument(
-                    symbol
-                )
-            )
-
-            candles = (
-                provider.get_candles(
-                    instrument[
-                        "instrument_key"
-                    ],
-                    timeframe,
-                )
-            )
-
-            data = candles_to_dataframe(
-                candles
-            )
+            data = candles_to_dataframe(candles)
 
             if len(data) < 60:
-
                 raise UpstoxProviderError(
-                    "Upstox returned fewer than "
-                    "60 candles."
+                    "Upstox returned fewer than 60 candles."
                 )
 
             quote = provider.get_quote(
-                instrument[
-                    "instrument_key"
-                ]
+                instrument["instrument_key"]
             )
 
             metadata = {
                 "provider": "upstox",
                 "requested_symbol": symbol,
                 "resolved_symbol": (
-                    instrument.get(
-                        "trading_symbol"
-                    )
-                    or instrument.get(
-                        "name"
-                    )
+                    instrument.get("trading_symbol")
+                    or instrument.get("name")
                     or symbol
                 ),
-                "instrument_key": (
-                    instrument.get(
-                        "instrument_key"
-                    )
-                ),
-                "segment": instrument.get(
-                    "segment"
-                ),
+                "instrument_key": instrument.get("instrument_key"),
+                "segment": instrument.get("segment"),
                 "timeframe": timeframe,
-                "note": (
-                    "Upstox read-only market data."
+                "market": selected_market,
+                "currency": "INR",
+                "exchange": (
+                    "INDEX"
+                    if selected_market == "INDEX"
+                    else "NSE"
                 ),
+                "note": "Upstox read-only market data.",
             }
 
-            return (
-                data,
-                metadata,
-                quote,
-            )
+            return data, metadata, quote
 
         except Exception as error:
-
-            print(
-                "Upstox market-data error:",
-                error,
-            )
+            print("Upstox market-data error:", error)
 
             if not ALLOW_YFINANCE_FALLBACK:
-
                 raise
 
     # --------------------------------------------------------
-    # FALLBACK: YFINANCE
+    # GLOBAL / FALLBACK: YFINANCE
     # --------------------------------------------------------
 
-    data = (
-        download_yfinance_market_data(
-            symbol,
-            timeframe,
-        )
+    data, resolved_yf_symbol = download_yfinance_market_data(
+        symbol,
+        timeframe,
+        selected_market,
     )
+
+    inferred_currency = infer_yfinance_currency(
+        resolved_yf_symbol,
+    )
+
+    # Plain global Yahoo symbols such as AAPL do not always expose
+    # currency metadata. In this app, GLOBAL search resolves those
+    # ordinary US-listed symbols through Yahoo Finance, so use USD
+    # as the backend fallback when Yahoo omitted the field.
+    if not inferred_currency and selected_market == "GLOBAL":
+        inferred_currency = "USD"
 
     metadata = {
         "provider": "yfinance_fallback",
         "requested_symbol": symbol,
-        "resolved_symbol": (
-            normalize_yfinance_symbol(
-                symbol
-            )
-        ),
+        "resolved_symbol": resolved_yf_symbol,
         "instrument_key": None,
         "segment": None,
         "timeframe": timeframe,
+        "market": selected_market,
+        "currency": inferred_currency,
+        "exchange": "Yahoo Finance",
         "note": (
-            "Fallback market data. "
-            "Not the primary Upstox feed."
+            "Yahoo Finance market data. "
+            "Used for global instruments or as the India fallback."
         ),
     }
 
-    return (
-        data,
-        metadata,
-        None,
-    )
+    return data, metadata, None
 
 
 # ============================================================
@@ -1506,6 +1543,15 @@ def build_market_analysis(
         "data_note": metadata.get(
             "note"
         ),
+        "market": metadata.get(
+            "market"
+        ),
+        "currency": metadata.get(
+            "currency"
+        ),
+        "exchange": metadata.get(
+            "exchange"
+        ),
         "timeframe": timeframe,
         "interval": TIMEFRAME_MAP[
             timeframe
@@ -2008,6 +2054,12 @@ def instrument_search(
                     )
                 ).strip()
 
+                if not currency:
+                    currency = infer_yfinance_currency(
+                        yahoo_symbol,
+                        exchange,
+                    )
+
                 name = str(
                     quote.get(
                         "longname",
@@ -2103,6 +2155,9 @@ def market(
     timeframe: str = Query(
         "15m"
     ),
+    market: str = Query(
+        "INDIA"
+    ),
 ) -> dict[str, Any]:
 
     try:
@@ -2111,6 +2166,7 @@ def market(
             download_market_data(
                 symbol,
                 timeframe,
+                market,
             )
         )
 
@@ -2247,6 +2303,7 @@ def watchlist_quotes() -> dict[str, Any]:
 def strategy_evidence(
     symbol: str = Query("RELIANCE"),
     timeframe: str = Query("15m"),
+    market: str = Query("INDIA"),
 ) -> dict[str, Any]:
     """
     Run the configured strategy against the selected market history
@@ -2259,16 +2316,21 @@ def strategy_evidence(
     try:
         requested_symbol = normalize_symbol(symbol)
 
-        # Keep .BO because it identifies a BSE listing.
-        # .NS can be stripped because NSE remains the default exchange.
+        # Keep exchange-qualified/global symbols exactly as selected.
+        # Only strip .NS for Indian strategy analysis because NSE remains
+        # the default exchange for ordinary Indian equity symbols.
         strategy_symbol = requested_symbol
 
-        if strategy_symbol.endswith(".NS"):
+        if (
+            market.strip().upper() == "INDIA"
+            and strategy_symbol.endswith(".NS")
+        ):
             strategy_symbol = strategy_symbol[:-3]
 
         data, metadata, quote = download_market_data(
             strategy_symbol,
             timeframe,
+            market,
         )
 
         result = analyze_strategy(
@@ -2297,6 +2359,9 @@ def strategy_evidence(
                 "previous_close",
                 "change",
                 "change_pct",
+                "market",
+                "currency",
+                "exchange",
                 "trend",
                 "signal",
                 "rsi",
@@ -2332,6 +2397,15 @@ def strategy_evidence(
             ),
             "data_note": metadata.get(
                 "note"
+            ),
+            "market": metadata.get(
+                "market"
+            ),
+            "currency": metadata.get(
+                "currency"
+            ),
+            "exchange": metadata.get(
+                "exchange"
             ),
             "timeframe": timeframe,
             "latest_candle": (
@@ -2369,6 +2443,7 @@ def agent(
             download_market_data(
                 request.symbol,
                 request.timeframe,
+                request.market,
             )
         )
 
@@ -2398,7 +2473,7 @@ SETUP STATUS
 {analysis["signal"]}
 
 PRICE
-₹{analysis["price"]:,.2f}
+{analysis.get("currency") or ""} {analysis["price"]:,.2f}
 
 CHANGE
 {analysis["change_pct"]:+.2f}%

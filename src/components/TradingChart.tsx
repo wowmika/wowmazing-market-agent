@@ -11,6 +11,7 @@ import {
 type TradingChartProps = {
   symbol: string;
   timeframe: string;
+  market: "INDIA" | "GLOBAL" | "INDEX";
   showEMA20: boolean;
   showEMA50: boolean;
   showVWAP: boolean;
@@ -129,6 +130,7 @@ function toLineData(
 export default function TradingChart({
   symbol,
   timeframe,
+  market,
   showEMA20,
   showEMA50,
   showVWAP,
@@ -172,9 +174,10 @@ export default function TradingChart({
           );
 
         const url =
-  `${API_BASE_URL}/market` +
-  `?symbol=${encodeURIComponent(apiSymbol)}` +
-  `&timeframe=${encodeURIComponent(timeframe)}`;
+          `${API_BASE_URL}/market` +
+          `?symbol=${encodeURIComponent(apiSymbol)}` +
+          `&timeframe=${encodeURIComponent(timeframe)}` +
+          `&market=${encodeURIComponent(market)}`;
 
         const response =
           await fetch(url);
@@ -236,6 +239,7 @@ export default function TradingChart({
   }, [
     symbol,
     timeframe,
+    market,
   ]);
 
 
