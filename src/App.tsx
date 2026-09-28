@@ -6,6 +6,8 @@ import {
   Send,
   Menu,
   Sparkles,
+  Sun,
+  Moon,
   X,
 } from "lucide-react";
 
@@ -253,6 +255,14 @@ function App() {
     useState(false);
 
 
+  // Visual theme state. This changes presentation only; all market,
+  // strategy, chart, and backend logic remains unchanged.
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = window.localStorage.getItem("wowmazing-theme");
+    return saved === "light" ? "light" : "dark";
+  });
+
+
   // ==========================================================
   // INDICATOR TOGGLE
   // ==========================================================
@@ -404,6 +414,12 @@ function App() {
   // Close the mobile navigation with Escape and prevent the
   // page from scrolling behind the open drawer.
   useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("wowmazing-theme", theme);
+  }, [theme]);
+
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setMobileSidebarOpen(false);
@@ -544,9 +560,32 @@ function App() {
   // RENDER
   // ==========================================================
 
-  return (
-    <div className="app-shell">
+  const displayPrice =
+    snapshot.price !== undefined
+      ? formatMoney(snapshot.price, currency)
+      : "—";
 
+  const displayChangePct =
+    snapshot.change_pct !== undefined
+      ? `${snapshot.change_pct >= 0 ? "+" : ""}${snapshot.change_pct.toFixed(2)}%`
+      : "—";
+
+  const marketMoveTone =
+    snapshot.change_pct === undefined
+      ? "wait"
+      : snapshot.change_pct >= 0
+        ? "positive"
+        : "negative";
+
+  const technicalSentiment =
+    snapshot.trend ||
+    "NEUTRAL";
+
+  return (
+    <div
+      className="app-shell"
+      data-theme={theme}
+    >
       {/* ====================================================
           SIDEBAR
       ==================================================== */}
@@ -557,7 +596,12 @@ function App() {
         onInstrumentMeta={(meta) => {
           setInstrumentMeta({
             market: meta.market,
-            currency: meta.currency || inferCurrencyFromSymbol(symbol, meta.market),
+            currency:
+              meta.currency ||
+              inferCurrencyFromSymbol(
+                symbol,
+                meta.market,
+              ),
             exchange: meta.exchange,
             provider: meta.provider,
           });
@@ -567,11 +611,11 @@ function App() {
           setLearningCenterOpen(true);
         }}
         indicators={indicators}
-        toggleIndicator={
-          toggleIndicator
-        }
+        toggleIndicator={toggleIndicator}
         mobileOpen={mobileSidebarOpen}
-        onClose={() => setMobileSidebarOpen(false)}
+        onClose={() =>
+          setMobileSidebarOpen(false)
+        }
       />
 
       {mobileSidebarOpen && (
@@ -579,29 +623,30 @@ function App() {
           type="button"
           className="mobile-sidebar-backdrop"
           aria-label="Close navigation"
-          onClick={() => setMobileSidebarOpen(false)}
+          onClick={() =>
+            setMobileSidebarOpen(false)
+          }
         />
       )}
 
       {learningCenterOpen && (
         <LearningCenter
-          onClose={() => setLearningCenterOpen(false)}
+          onClose={() =>
+            setLearningCenterOpen(false)
+          }
         />
       )}
-
 
       {/* ====================================================
           MAIN
       ==================================================== */}
 
       <main className="main-area">
-
         {/* ==================================================
             TOP BAR
         ================================================== */}
 
         <header className="topbar">
-
           <button
             type="button"
             className="mobile-menu-button"
@@ -611,77 +656,88 @@ function App() {
               setMobileSidebarOpen(true)
             }
           >
-            <Menu size={18} />
+            <Menu size={17} />
             <span>Menu</span>
           </button>
 
-          <div>
-
+          <div className="topbar-market">
             <div className="market-label">
               {instrumentMeta.market === "GLOBAL"
-                ? "GLOBAL / MARKET"
+                ? "GLOBAL MARKET"
                 : instrumentMeta.market === "INDEX"
-                  ? "INDEX / MARKET"
-                  : instrumentMeta.exchange === "BSE"
-                    ? "BSE / CASH MARKET"
-                    : "NSE / CASH MARKET"}
+                  ? "INDEX MARKET"
+                  : instrumentMeta.exchange ===
+                      "BSE"
+                    ? "BSE CASH MARKET"
+                    : "NSE CASH MARKET"}
             </div>
 
             <div className="symbol-row">
-
-              <div>
-
-                <h1>
-                  {symbol}
-                </h1>
+              <div className="symbol-heading">
+                <div className="ticker-line">
+                  <h1>{symbol}</h1>
+                  <span className="market-pill">
+                    {instrumentMeta.market ===
+                    "GLOBAL"
+                      ? "GLOBAL"
+                      : instrumentMeta.market ===
+                          "INDEX"
+                        ? "INDEX"
+                        : instrumentMeta.exchange ===
+                            "BSE"
+                          ? "BSE"
+                          : "NSE"}
+                  </span>
+                </div>
 
                 <p>
                   {symbol === "RELIANCE"
                     ? "Reliance Industries"
                     : "Selected instrument"}
                 </p>
-
               </div>
 
               <div className="price-box">
-
                 <strong>
-                  {snapshot.price
-                    ? formatMoney(snapshot.price, currency)
-                    : formatMoney(1245.40, currency)}
+                  {displayPrice}
                 </strong>
 
                 <span
-                  className={
-                    snapshot.change_pct !== undefined &&
-                    snapshot.change_pct < 0
-                      ? "negative"
-                      : "positive"
-                  }
+                  className={marketMoveTone}
                 >
-
-                  {snapshot.change_pct !==
-                  undefined
-                    ? `${snapshot.change_pct >= 0 ? "+" : ""}${snapshot.change_pct.toFixed(2)}%`
-                    : "--"}
-
+                  {displayChangePct}
                 </span>
-
               </div>
-
             </div>
-
           </div>
 
-
           <div className="top-actions">
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label={
+                theme === "dark"
+                  ? "Switch to light mode"
+                  : "Switch to dark mode"
+              }
+              onClick={() =>
+                setTheme((current) =>
+                  current === "dark"
+                    ? "light"
+                    : "dark",
+                )
+              }
+            >
+              {theme === "dark" ? (
+                <Sun size={16} />
+              ) : (
+                <Moon size={16} />
+              )}
+            </button>
 
             <div className="engine-badge">
-
               <span className="status-dot" />
-
               ENGINE ONLINE
-
             </div>
 
             <button
@@ -692,191 +748,474 @@ function App() {
                 )
               }
             >
-
-              <Sparkles size={16} />
-
+              <Sparkles size={15} />
               Ask Agent
-
             </button>
-
           </div>
-
         </header>
-
 
         {/* ==================================================
             CONTENT
         ================================================== */}
 
         <div className="content">
-
-
-          {/* ==================================================
-              TOOLBAR
-          ================================================== */}
-
           <section className="toolbar">
-
             <div className="timeframe-bar">
-
-              {timeframes.map(
-                (item) => (
-
-                  <button
-                    key={item}
-                    className={
-                      timeframe === item
-                        ? "timeframe active"
-                        : "timeframe"
-                    }
-                    onClick={() =>
-                      setTimeframe(item)
-                    }
-                  >
-                    {item}
-                  </button>
-
-                ),
-              )}
-
+              {timeframes.map((item) => (
+                <button
+                  key={item}
+                  className={
+                    timeframe === item
+                      ? "timeframe active"
+                      : "timeframe"
+                  }
+                  onClick={() =>
+                    setTimeframe(item)
+                  }
+                >
+                  {item}
+                </button>
+              ))}
             </div>
-
 
             <div className="analysis-settings">
-
               <button className="setting-button">
-
                 <Clock3 size={14} />
-
                 Primary {timeframe}
-
                 <ChevronDown size={13} />
-
               </button>
 
-
               <button className="setting-button">
-
                 <Clock3 size={14} />
-
                 Confirm 1H
-
                 <ChevronDown size={13} />
-
               </button>
-
 
               <button className="setting-button">
-
                 Risk 1%
-
                 <ChevronDown size={13} />
-
               </button>
-
             </div>
-
           </section>
-
 
           {/* ==================================================
-              HERO METRICS
+              OVERVIEW
           ================================================== */}
 
-          <section className="hero-metrics">
+          <section className="dashboard-section overview-section">
+            <div className="section-heading-block">
+              <div>
+                <span className="eyebrow">
+                  OVERVIEW
+                </span>
+                <h2>
+                  {symbol} market overview
+                </h2>
+              </div>
 
-            <Metric
-              label="LATEST PRICE"
-              value={
-                snapshot.price !== undefined
-                  ? formatMoney(snapshot.price, currency)
-                  : "—"
-              }
-              detail="Latest available"
-            />
+              <span className="data-status-pill">
+                {strategyEvidenceLoading
+                  ? "Updating"
+                  : "Live data"}
+              </span>
+            </div>
 
+            <div className="overview-grid">
+              <article className="overview-card overview-price-card">
+                <span className="metric-label">
+                  CURRENT PRICE
+                </span>
 
-            <Metric
-              label="MARKET MOVE"
-              value={
-                snapshot.change !==
-                undefined
-                  ? `${snapshot.change >= 0 ? "+" : "-"}${formatMoney(Math.abs(snapshot.change), currency)}`
-                  : "—"
-              }
-              detail={
-                snapshot.change_pct !==
-                undefined
-                  ? `${snapshot.change_pct >= 0 ? "+" : ""}${snapshot.change_pct.toFixed(2)}% vs previous close`
-                  : "Latest available"
-              }
-              tone={
-                snapshot.change === undefined
-                  ? "wait"
-                  : snapshot.change >= 0
-                    ? "positive"
-                    : "negative"
-              }
-            />
+                <strong className="overview-price">
+                  {displayPrice}
+                </strong>
 
+                <div
+                  className={`overview-change ${marketMoveTone}`}
+                >
+                  {displayChangePct}
+                  <span>
+                    {snapshot.change !==
+                    undefined
+                      ? `${snapshot.change >= 0 ? "+" : ""}${formatMoney(
+                          Math.abs(
+                            snapshot.change,
+                          ),
+                          currency,
+                        )} today`
+                      : "Awaiting change data"}
+                  </span>
+                </div>
 
-            <Metric
-              label="MARKET BIAS"
-              value={
-                snapshot.trend ||
-                "—"
-              }
-              detail={
-                snapshot.rsi !==
-                undefined
-                  ? `RSI ${snapshot.rsi.toFixed(2)}`
-                  : "Latest available"
-              }
-              tone={
-                snapshot.trend ===
-                "BULLISH"
-                  ? "positive"
-                  : snapshot.trend ===
-                      "BEARISH"
-                    ? "negative"
-                    : "wait"
-              }
-            />
+                <div className="overview-meta-row">
+                  <span>
+                    {instrumentMeta.exchange ||
+                      instrumentMeta.market}
+                  </span>
+                  <span>
+                    {timeframe}
+                  </span>
+                  <span>
+                    {currency}
+                  </span>
+                </div>
+              </article>
 
+              <article className="overview-card">
+                <div className="card-inline-heading">
+                  <div>
+                    <span className="metric-label">
+                      MARKET BIAS
+                    </span>
+                    <strong
+                      className={
+                        snapshot.trend ===
+                        "BULLISH"
+                          ? "positive"
+                          : snapshot.trend ===
+                              "BEARISH"
+                            ? "negative"
+                            : "wait"
+                      }
+                    >
+                      {technicalSentiment}
+                    </strong>
+                  </div>
 
-            <Metric
-              label="SIGNAL"
-              value={snapshot.signal || "—"}
-              detail="Market engine signal"
-              tone={
-                snapshot.signal === "BUY"
-                  ? "positive"
-                  : snapshot.signal === "SELL"
-                    ? "negative"
-                    : "wait"
-              }
-            />
+                  <span className="soft-pill">
+                    Technical
+                  </span>
+                </div>
 
+                <div className="overview-mini-grid">
+                  <div>
+                    <span>RSI</span>
+                    <strong>
+                      {snapshot.rsi !==
+                      undefined
+                        ? snapshot.rsi.toFixed(
+                            2,
+                          )
+                        : "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>SIGNAL</span>
+                    <strong
+                      className={
+                        snapshot.signal ===
+                        "BUY"
+                          ? "positive"
+                          : snapshot.signal ===
+                              "SELL"
+                            ? "negative"
+                            : ""
+                      }
+                    >
+                      {snapshot.signal ||
+                        "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>VOLUME</span>
+                    <strong>
+                      {snapshot.volume_ratio !==
+                      undefined
+                        ? `${snapshot.volume_ratio.toFixed(2)}×`
+                        : "—"}
+                    </strong>
+                  </div>
+
+                  <div>
+                    <span>ATR</span>
+                    <strong>
+                      {snapshot.atr !==
+                      undefined
+                        ? snapshot.atr.toFixed(
+                            2,
+                          )
+                        : "—"}
+                    </strong>
+                  </div>
+                </div>
+              </article>
+            </div>
           </section>
 
+          {/* ==================================================
+              KEY METRICS
+          ================================================== */}
+
+          <section className="dashboard-section">
+            <div className="section-heading-block compact">
+              <div>
+                <span className="eyebrow">
+                  KEY METRICS
+                </span>
+                <h2>
+                  Fundamentals & technicals
+                </h2>
+              </div>
+
+              <span className="section-note">
+                Fundamentals fields require a
+                fundamentals feed.
+              </span>
+            </div>
+
+            <div className="key-metrics-grid">
+              <Metric
+                label="P / E"
+                value="—"
+                detail="Fundamentals unavailable"
+              />
+
+              <Metric
+                label="MARKET CAP"
+                value="—"
+                detail="Fundamentals unavailable"
+              />
+
+              <Metric
+                label="52W RANGE"
+                value="—"
+                detail="Fundamentals unavailable"
+              />
+
+              <Metric
+                label="RSI"
+                value={
+                  snapshot.rsi !==
+                  undefined
+                    ? snapshot.rsi.toFixed(
+                        2,
+                      )
+                    : "—"
+                }
+                detail="Momentum"
+              />
+
+              <Metric
+                label="EMA 20"
+                value={
+                  snapshot.ema20 !==
+                  undefined
+                    ? formatMoney(
+                        snapshot.ema20,
+                        currency,
+                      )
+                    : "—"
+                }
+                detail="Trend"
+              />
+
+              <Metric
+                label="EMA 50"
+                value={
+                  snapshot.ema50 !==
+                  undefined
+                    ? formatMoney(
+                        snapshot.ema50,
+                        currency,
+                      )
+                    : "—"
+                }
+                detail="Trend"
+              />
+            </div>
+          </section>
+
+          {/* ==================================================
+              CHART
+          ================================================== */}
+
+          <section className="dashboard-section terminal-card chart-card">
+            <div className="card-header">
+              <div>
+                <span className="eyebrow">
+                  PRICE ACTION
+                </span>
+
+                <h2>
+                  Interactive chart
+                </h2>
+              </div>
+
+              <div className="chart-tools">
+                <span>
+                  {instrumentMeta.market ===
+                  "GLOBAL"
+                    ? "GLOBAL"
+                    : instrumentMeta.market ===
+                        "INDEX"
+                      ? "INDEX"
+                      : instrumentMeta.exchange ===
+                          "BSE"
+                        ? "BSE"
+                        : "NSE"}
+                </span>
+
+                <button
+                  type="button"
+                  aria-label="Search chart"
+                >
+                  <Search size={13} />
+                </button>
+
+                <button
+                  type="button"
+                  aria-label="Chart settings"
+                >
+                  <ChevronDown
+                    size={13}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <TradingChart
+              symbol={symbol}
+              timeframe={timeframe}
+              market={instrumentMeta.market}
+              showEMA20={
+                indicators["EMA 20"]
+              }
+              showEMA50={
+                indicators["EMA 50"]
+              }
+              showVWAP={
+                indicators.VWAP
+              }
+            />
+          </section>
+
+          {/* ==================================================
+              TECHNICAL METRICS
+          ================================================== */}
+
+          <section className="dashboard-section">
+            <div className="section-heading-block compact">
+              <div>
+                <span className="eyebrow">
+                  TECHNICAL SNAPSHOT
+                </span>
+                <h2>
+                  Signals at a glance
+                </h2>
+              </div>
+            </div>
+
+            <div className="technical-metrics-grid">
+              <Metric
+                label="MACD"
+                value={
+                  snapshot.macd !==
+                  undefined
+                    ? snapshot.macd.toFixed(
+                        2,
+                      )
+                    : "—"
+                }
+                detail="Quant engine"
+              />
+
+              <Metric
+                label="VWAP"
+                value={
+                  snapshot.vwap !==
+                  undefined
+                    ? formatMoney(
+                        snapshot.vwap,
+                        currency,
+                      )
+                    : "—"
+                }
+                detail="Chart indicator"
+              />
+
+              <Metric
+                label="ATR"
+                value={
+                  snapshot.atr !==
+                  undefined
+                    ? snapshot.atr.toFixed(
+                        2,
+                      )
+                    : "—"
+                }
+                detail="Volatility"
+              />
+
+              <Metric
+                label="REL. VOLUME"
+                value={
+                  snapshot.volume_ratio !==
+                  undefined
+                    ? `${snapshot.volume_ratio.toFixed(2)}×`
+                    : "—"
+                }
+                detail="Current / average"
+              />
+
+              <Metric
+                label="EMA 20"
+                value={
+                  snapshot.ema20 !==
+                  undefined
+                    ? formatMoney(
+                        snapshot.ema20,
+                        currency,
+                      )
+                    : "—"
+                }
+                detail="Trend"
+              />
+
+              <Metric
+                label="EMA 50"
+                value={
+                  snapshot.ema50 !==
+                  undefined
+                    ? formatMoney(
+                        snapshot.ema50,
+                        currency,
+                      )
+                    : "—"
+                }
+                detail="Trend"
+              />
+            </div>
+          </section>
 
           {/* ==================================================
               MARKET STRUCTURE
           ================================================== */}
 
-          <MarketStructure />
+          <section className="dashboard-section">
+            <div className="section-heading-block compact">
+              <div>
+                <span className="eyebrow">
+                  MARKET STRUCTURE
+                </span>
+                <h2>
+                  Price structure & position planning
+                </h2>
+              </div>
+            </div>
 
+            <MarketStructure />
+            <PositionPlanner />
+          </section>
 
           {/* ==================================================
               STRATEGY EVIDENCE
           ================================================== */}
 
-          <section className="terminal-card evidence-card-wrapper">
-
+          <section className="dashboard-section terminal-card evidence-card-wrapper">
             <div className="card-header">
-
               <div>
-
                 <span className="eyebrow">
                   STRATEGY RESEARCH
                 </span>
@@ -884,19 +1223,14 @@ function App() {
                 <h2>
                   Strategy Evidence
                 </h2>
-
               </div>
 
               <div className="chart-tools">
-
                 <span>
                   BACKTEST LAB
                 </span>
-
               </div>
-
             </div>
-
 
             <StrategyEvidence
               evidence={
@@ -917,184 +1251,88 @@ function App() {
                 {strategyEvidenceError}
               </div>
             )}
-
           </section>
 
-
           {/* ==================================================
-              CHART
+              NEWS / SENTIMENT
           ================================================== */}
 
-          <section className="terminal-card chart-card">
-
-            <div className="card-header">
-
+          <section className="dashboard-section news-sentiment-card">
+            <div className="section-heading-block">
               <div>
-
                 <span className="eyebrow">
-                  PRICE ACTION
+                  NEWS & SENTIMENT
                 </span>
 
                 <h2>
-                  {symbol} · {timeframe}
+                  Research context
                 </h2>
-
               </div>
 
-              <div className="chart-tools">
-
-                <span>
-                  {instrumentMeta.market === "GLOBAL"
-                    ? "GLOBAL"
-                    : instrumentMeta.market === "INDEX"
-                      ? "INDEX"
-                      : instrumentMeta.exchange === "BSE"
-                        ? "BSE"
-                        : "NSE"}
-                </span>
-
-                <button>
-                  <Search size={13} />
-                </button>
-
-                <button>
-                  <ChevronDown size={13} />
-                </button>
-
-              </div>
-
+              <span className="soft-pill">
+                Feed status
+              </span>
             </div>
 
+            <div className="news-layout">
+              <div className="sentiment-panel">
+                <span className="metric-label">
+                  TECHNICAL SENTIMENT
+                </span>
 
-            <TradingChart
-              symbol={symbol}
-              timeframe={timeframe}
-              market={instrumentMeta.market}
-              showEMA20={
-                indicators["EMA 20"]
-              }
-              showEMA50={
-                indicators["EMA 50"]
-              }
-              showVWAP={
-                indicators.VWAP
-              }
-            />
+                <strong
+                  className={
+                    snapshot.trend ===
+                    "BULLISH"
+                      ? "positive"
+                      : snapshot.trend ===
+                          "BEARISH"
+                        ? "negative"
+                        : "wait"
+                  }
+                >
+                  {technicalSentiment}
+                </strong>
 
+                <p>
+                  This is derived from the
+                  current technical snapshot,
+                  not from external news.
+                </p>
+              </div>
+
+              <div className="news-placeholder">
+                <div className="placeholder-icon">
+                  <Search size={17} />
+                </div>
+
+                <div>
+                  <strong>
+                    Live news feed is not connected
+                  </strong>
+
+                  <span>
+                    No headlines or external
+                    sentiment are being invented
+                    here. Connect a news provider
+                    when that data source is
+                    available.
+                  </span>
+                </div>
+              </div>
+            </div>
           </section>
-
-
-          {/* ==================================================
-              INDICATOR SUMMARY
-          ================================================== */}
-
-          <section className="indicator-summary">
-
-            <Metric
-              label="RSI"
-              value={
-                snapshot.rsi !==
-                undefined
-                  ? snapshot.rsi.toFixed(2)
-                  : "—"
-              }
-              detail="Momentum"
-            />
-
-
-            <Metric
-              label="MACD"
-              value={
-                snapshot.macd !== undefined
-                  ? snapshot.macd.toFixed(2)
-                  : "—"
-              }
-              detail="Quant engine"
-            />
-
-
-            <Metric
-              label="EMA 20"
-              value={
-                snapshot.ema20 !==
-                undefined
-                  ? formatMoney(snapshot.ema20, currency)
-                  : "—"
-              }
-              detail="Trend"
-            />
-
-
-            <Metric
-              label="EMA 50"
-              value={
-                snapshot.ema50 !==
-                undefined
-                  ? formatMoney(snapshot.ema50, currency)
-                  : "—"
-              }
-              detail="Trend"
-            />
-
-
-            <Metric
-              label="VWAP"
-              value={
-                snapshot.vwap !== undefined
-                  ? formatMoney(snapshot.vwap, currency)
-                  : "—"
-              }
-              detail="Chart indicator"
-            />
-
-
-            <Metric
-              label="ATR"
-              value={
-                snapshot.atr !== undefined
-                  ? snapshot.atr.toFixed(2)
-                  : "—"
-              }
-              detail="Volatility"
-            />
-
-
-            <Metric
-              label="VOLUME"
-              value={
-                snapshot.volume_ratio !==
-                undefined
-                  ? `${snapshot.volume_ratio.toFixed(2)}×`
-                  : "—"
-              }
-              detail="Relative volume"
-            />
-
-          </section>
-
-
-          {/* ==================================================
-              POSITION PLANNER
-          ================================================== */}
-
-          <PositionPlanner />
-
 
           {/* ==================================================
               AGENT COMMAND BAR
           ================================================== */}
 
           <section className="agent-command-bar">
-
             <div className="agent-command-icon">
-
               <Sparkles size={17} />
-
             </div>
 
-
             <div>
-
               <strong>
                 Ask WOWMAZING Market Agent
               </strong>
@@ -1103,9 +1341,7 @@ function App() {
                 Try: “Analyze {symbol} on{" "}
                 {timeframe}.”
               </span>
-
             </div>
-
 
             <button
               onClick={() =>
@@ -1116,16 +1352,9 @@ function App() {
             >
               Open Agent
             </button>
-
           </section>
 
-
-          {/* ==================================================
-              FOOTER
-          ================================================== */}
-
           <footer className="app-footer">
-
             <span>
               WOWMAZING Market Agent V1
             </span>
@@ -1134,36 +1363,27 @@ function App() {
               Research terminal · AI-assisted
               decision support
             </span>
-
           </footer>
-
         </div>
-
       </main>
-
 
       {/* ====================================================
           AGENT MODAL
       ==================================================== */}
 
       {agentOpen && (
-
         <div
           className="agent-overlay"
           onClick={closeAgent}
         >
-
           <div
             className="agent-modal"
             onClick={(event) =>
               event.stopPropagation()
             }
           >
-
             <div className="agent-modal-top">
-
               <div>
-
                 <span className="eyebrow">
                   AI COMMAND CENTER
                 </span>
@@ -1171,28 +1391,20 @@ function App() {
                 <h2>
                   Ask WOWMAZING
                 </h2>
-
               </div>
 
-
               <button
+                type="button"
                 onClick={closeAgent}
                 disabled={agentLoading}
+                aria-label="Close agent"
               >
-
                 <X size={17} />
-
               </button>
-
             </div>
 
-
-            <form
-              onSubmit={sendToAgent}
-            >
-
+            <form onSubmit={sendToAgent}>
               <div className="agent-input">
-
                 <Sparkles size={17} />
 
                 <input
@@ -1215,36 +1427,27 @@ function App() {
                   }
                   className="agent-send"
                 >
-
                   {agentLoading ? (
                     <span className="spinner" />
                   ) : (
                     <Send size={15} />
                   )}
-
                 </button>
-
               </div>
-
             </form>
 
-
             {agentError && (
-
               <div className="agent-error">
                 {agentError}
               </div>
-
             )}
-
 
             {!agentAnswer &&
               !agentLoading &&
               !agentError && (
-
                 <div className="agent-suggestions">
-
                   <button
+                    type="button"
                     onClick={() =>
                       setCommand(
                         `Analyze ${symbol} on ${timeframe}.`,
@@ -1254,8 +1457,8 @@ function App() {
                     Analyze current setup
                   </button>
 
-
                   <button
+                    type="button"
                     onClick={() =>
                       setCommand(
                         `Explain the current technical conditions for ${symbol}.`,
@@ -1265,8 +1468,8 @@ function App() {
                     Explain the current conditions
                   </button>
 
-
                   <button
+                    type="button"
                     onClick={() =>
                       setCommand(
                         `What should I watch next for ${symbol}?`,
@@ -1275,16 +1478,11 @@ function App() {
                   >
                     Tell me what to watch next
                   </button>
-
                 </div>
-
               )}
 
-
             {agentLoading && (
-
               <div className="agent-loading">
-
                 <div className="loading-orb" />
 
                 <strong>
@@ -1292,24 +1490,17 @@ function App() {
                 </strong>
 
                 <span>
-                  Fetching market data and
-                  preparing the response.
+                  Fetching market data and preparing
+                  the response.
                 </span>
-
               </div>
-
             )}
-
 
             {agentAnswer &&
               !agentLoading && (
-
                 <div className="agent-result">
-
                   <div className="agent-result-header">
-
                     <div>
-
                       <span>
                         AGENT RESPONSE
                       </span>
@@ -1318,54 +1509,40 @@ function App() {
                         {snapshot.symbol ||
                           apiSymbol}
                       </strong>
-
                     </div>
 
                     <div className="agent-result-timeframe">
-
                       {snapshot.timeframe ||
                         timeframe}
-
                     </div>
-
                   </div>
-
 
                   <div className="agent-answer">
-
                     {agentAnswer
                       .split("\n")
-                      .map(
-                        (
-                          line,
-                          index,
-                        ) => (
-
-                          <p
-                            key={`${index}-${line}`}
-                          >
-                            {line ||
-                              "\u00A0"}
-                          </p>
-
-                        ),
-                      )}
-
+                      .map((line, index) => (
+                        <p
+                          key={`${index}-${line}`}
+                        >
+                          {line ||
+                            "\u00A0"}
+                        </p>
+                      ))}
                   </div>
 
-
                   <div className="agent-snapshot">
-
                     <SnapshotItem
                       label="PRICE"
                       value={
                         snapshot.price !==
                         undefined
-                          ? formatMoney(snapshot.price, currency)
+                          ? formatMoney(
+                              snapshot.price,
+                              currency,
+                            )
                           : "--"
                       }
                     />
-
 
                     <SnapshotItem
                       label="TREND"
@@ -1374,7 +1551,6 @@ function App() {
                         "--"
                       }
                     />
-
 
                     <SnapshotItem
                       label="RSI"
@@ -1388,7 +1564,6 @@ function App() {
                       }
                     />
 
-
                     <SnapshotItem
                       label="VOL"
                       value={
@@ -1398,11 +1573,10 @@ function App() {
                           : "--"
                       }
                     />
-
                   </div>
 
-
                   <button
+                    type="button"
                     className="agent-new-command"
                     onClick={() => {
                       setAgentAnswer("");
@@ -1411,17 +1585,11 @@ function App() {
                   >
                     Ask another question
                   </button>
-
                 </div>
-
               )}
-
           </div>
-
         </div>
-
       )}
-
     </div>
   );
 }

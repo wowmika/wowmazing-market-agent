@@ -74,9 +74,16 @@ type MarketResponse = {
 
 function normalizeSymbol(
   symbol: string,
+  market: "INDIA" | "GLOBAL" | "INDEX",
 ): string {
   const cleaned =
     symbol.trim().toUpperCase();
+
+  // Global instruments must stay as their exact Yahoo Finance symbol.
+  // Example: AAPL must remain AAPL, not AAPL.NS.
+  if (market === "GLOBAL") {
+    return cleaned;
+  }
 
   if (
     cleaned === "NIFTY 50" ||
@@ -86,7 +93,9 @@ function normalizeSymbol(
   }
 
   if (
-    cleaned === "BANKNIFTY"
+    cleaned === "BANKNIFTY" ||
+    cleaned === "BANK NIFTY" ||
+    cleaned === "NIFTY BANK"
   ) {
     return "^NSEBANK";
   }
@@ -171,6 +180,7 @@ export default function TradingChart({
         const apiSymbol =
           normalizeSymbol(
             symbol,
+            market,
           );
 
         const url =
@@ -623,7 +633,7 @@ export default function TradingChart({
         !error &&
         marketData && (
           <div className="chart-live-badge">
-            ● UPSTOX MARKET DATA
+            ● {market === "GLOBAL" ? "YAHOO FINANCE MARKET DATA" : "UPSTOX MARKET DATA"}
           </div>
         )}
 

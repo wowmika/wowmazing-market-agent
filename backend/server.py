@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import os
@@ -566,7 +566,34 @@ def download_market_data(
     ):
         try:
             provider = get_upstox_provider()
-            instrument = provider.resolve_instrument(symbol)
+            
+            # Resolve dashboard index symbols directly to known Upstox index keys.
+            index_instrument_keys = {
+                "NIFTY 50": "NSE_INDEX|Nifty 50",
+                "NIFTY": "NSE_INDEX|Nifty 50",
+                "^NSEI": "NSE_INDEX|Nifty 50",
+                "BANKNIFTY": "NSE_INDEX|Nifty Bank",
+                "BANK NIFTY": "NSE_INDEX|Nifty Bank",
+                "NIFTY BANK": "NSE_INDEX|Nifty Bank",
+                "^NSEBANK": "NSE_INDEX|Nifty Bank",
+            }
+
+            index_key = index_instrument_keys.get(symbol.upper())
+
+            if selected_market == "INDEX" and index_key:
+                display_name = (
+                    "NIFTY 50"
+                    if index_key == "NSE_INDEX|Nifty 50"
+                    else "BANKNIFTY"
+                )
+                instrument = {
+                    "instrument_key": index_key,
+                    "trading_symbol": display_name,
+                    "name": display_name,
+                    "segment": "NSE_INDEX",
+                }
+            else:
+                instrument = provider.resolve_instrument(symbol)
 
             candles = provider.get_candles(
                 instrument["instrument_key"],
