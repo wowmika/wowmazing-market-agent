@@ -2261,3 +2261,724 @@ html[data-theme="light"] .negative {
     height: 390px;
   }
 }
+/* ============================================================
+   WOWMAZING MARKET AGENT
+   MODERN INTELLIGENCE TERMINAL — VISUAL V2
+   This layer keeps existing component/data classes compatible
+   while upgrading hierarchy, depth, motion, responsiveness,
+   focus states, glass surfaces, and the AI research experience.
+   ============================================================ */
+
+:root {
+  --wm-accent: #7dd3fc;
+  --wm-accent-2: #a78bfa;
+  --wm-accent-soft: rgba(125, 211, 252, 0.12);
+  --wm-violet-soft: rgba(167, 139, 250, 0.12);
+  --wm-grid: rgba(148, 163, 184, 0.045);
+  --wm-glass: rgba(15, 23, 42, 0.66);
+  --wm-glass-strong: rgba(15, 23, 42, 0.82);
+  --wm-glow: 0 0 0 1px rgba(125, 211, 252, 0.08),
+              0 18px 60px rgba(2, 6, 23, 0.20);
+  --wm-radius-xl: 20px;
+  --wm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html {
+  scroll-behavior: smooth;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  min-width: 320px;
+  overflow-x: hidden;
+}
+
+::selection {
+  color: #07111c;
+  background: rgba(125, 211, 252, 0.78);
+}
+
+button,
+input,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--wm-accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------
+   TERMINAL BACKDROP
+   ------------------------------------------------------------ */
+
+.app-shell {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      900px 420px at 78% -8%,
+      rgba(125, 211, 252, 0.09),
+      transparent 68%
+    ),
+    radial-gradient(
+      760px 460px at 18% 0%,
+      rgba(167, 139, 250, 0.075),
+      transparent 66%
+    ),
+    linear-gradient(
+      180deg,
+      var(--wm-bg) 0%,
+      var(--wm-bg-deep) 100%
+    );
+}
+
+.app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.48;
+  background-image:
+    linear-gradient(
+      to right,
+      var(--wm-grid) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      var(--wm-grid) 1px,
+      transparent 1px
+    );
+  background-size: 64px 64px;
+  mask-image: linear-gradient(
+    to bottom,
+    black 0%,
+    transparent 78%
+  );
+}
+
+html[data-theme="light"] .app-shell::before {
+  opacity: 0.26;
+}
+
+/* ------------------------------------------------------------
+   GLASS SIDEBAR
+   ------------------------------------------------------------ */
+
+.sidebar {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(15, 23, 42, 0.92),
+      rgba(11, 18, 32, 0.84)
+    );
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  box-shadow: 16px 0 60px rgba(2, 6, 23, 0.10);
+}
+
+.brand-logo {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background:
+    linear-gradient(
+      135deg,
+      var(--wm-accent),
+      var(--wm-accent-2)
+    );
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.10),
+    0 0 30px rgba(125, 211, 252, 0.10);
+}
+
+.brand-logo::after {
+  content: "";
+  position: absolute;
+  inset: -35%;
+  background: linear-gradient(
+    115deg,
+    transparent 38%,
+    rgba(255, 255, 255, 0.34) 50%,
+    transparent 62%
+  );
+  transform: translateX(-80%) rotate(9deg);
+  transition: transform 700ms var(--wm-ease);
+}
+
+.brand:hover .brand-logo::after {
+  transform: translateX(80%) rotate(9deg);
+}
+
+.side-nav,
+.watch-item,
+.indicator-row {
+  transition:
+    background-color 180ms var(--wm-ease),
+    color 180ms var(--wm-ease),
+    transform 180ms var(--wm-ease),
+    border-color 180ms var(--wm-ease);
+}
+
+.side-nav:hover,
+.watch-item:hover,
+.indicator-row:hover {
+  transform: translateX(2px);
+}
+
+/* ------------------------------------------------------------
+   TOP BAR / COMMAND SURFACE
+   ------------------------------------------------------------ */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  border-bottom-color: var(--wm-border);
+  background:
+    color-mix(
+      in srgb,
+      var(--wm-bg) 78%,
+      transparent
+    );
+  backdrop-filter: blur(24px) saturate(130%);
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+}
+
+.symbol-row h1 {
+  font-variant-numeric: tabular-nums;
+}
+
+.price-box strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-agent {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(125, 211, 252, 0.22);
+  background:
+    linear-gradient(
+      135deg,
+      rgba(125, 211, 252, 0.12),
+      rgba(167, 139, 250, 0.10)
+    );
+  box-shadow:
+    0 8px 28px rgba(2, 6, 23, 0.12);
+}
+
+.ask-agent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(
+      110deg,
+      transparent 25%,
+      rgba(255, 255, 255, 0.10) 50%,
+      transparent 75%
+    );
+  transform: translateX(-120%);
+  transition: transform 650ms var(--wm-ease);
+}
+
+.ask-agent:hover::after {
+  transform: translateX(120%);
+}
+
+.engine-badge {
+  box-shadow:
+    inset 0 0 0 1px rgba(52, 211, 153, 0.05);
+}
+
+.status-dot {
+  animation: wm-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes wm-pulse {
+  0%, 100% {
+    opacity: 0.72;
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.20);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 5px rgba(52, 211, 153, 0);
+  }
+}
+
+/* ------------------------------------------------------------
+   TOOLBAR
+   ------------------------------------------------------------ */
+
+.timeframe-bar,
+.setting-button {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.018);
+}
+
+.timeframe.active {
+  color: var(--wm-text);
+  background:
+    linear-gradient(
+      180deg,
+      rgba(125, 211, 252, 0.14),
+      rgba(125, 211, 252, 0.06)
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(125, 211, 252, 0.20),
+    0 4px 18px rgba(2, 6, 23, 0.10);
+}
+
+.setting-button:hover,
+.theme-toggle:hover {
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.10);
+}
+
+/* ------------------------------------------------------------
+   MODERN CARDS
+   ------------------------------------------------------------ */
+
+.overview-card,
+.terminal-card,
+.news-sentiment-card,
+.key-metrics-grid .metric-card,
+.technical-metrics-grid .metric-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.overview-card::before,
+.terminal-card::before,
+.news-sentiment-card::before,
+.key-metrics-grid .metric-card::before,
+.technical-metrics-grid .metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.035),
+      transparent 32%
+    );
+}
+
+.overview-card,
+.terminal-card,
+.news-sentiment-card {
+  box-shadow: var(--wm-glow);
+  transition:
+    transform 260ms var(--wm-ease),
+    border-color 260ms var(--wm-ease),
+    box-shadow 260ms var(--wm-ease);
+}
+
+.overview-card:hover,
+.terminal-card:hover,
+.news-sentiment-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.06),
+    0 24px 70px rgba(2, 6, 23, 0.17);
+}
+
+/* ------------------------------------------------------------
+   OVERVIEW / MARKET STATE
+   ------------------------------------------------------------ */
+
+.overview-price-card {
+  background:
+    radial-gradient(
+      420px 180px at 5% 0%,
+      rgba(125, 211, 252, 0.065),
+      transparent 70%
+    ),
+    var(--wm-surface);
+}
+
+.data-status-pill {
+  gap: 6px;
+}
+
+.data-status-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wm-green);
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.28);
+}
+
+/* ------------------------------------------------------------
+   METRICS — RESEARCH TERMINAL LOOK
+   ------------------------------------------------------------ */
+
+.key-metrics-grid .metric-card,
+.technical-metrics-grid .metric-card {
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  transition:
+    transform 220ms var(--wm-ease),
+    background-color 220ms var(--wm-ease),
+    border-color 220ms var(--wm-ease);
+}
+
+.key-metrics-grid .metric-card:hover,
+.technical-metrics-grid .metric-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(125, 211, 252, 0.22);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--wm-surface) 92%, var(--wm-accent) 8%),
+      var(--wm-surface)
+    );
+}
+
+.metric-card strong {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------
+   CHART AREA
+   ------------------------------------------------------------ */
+
+.chart-card {
+  background:
+    radial-gradient(
+      460px 170px at 50% 0%,
+      rgba(125, 211, 252, 0.032),
+      transparent 72%
+    ),
+    var(--wm-surface);
+}
+
+.chart-wrapper {
+  isolation: isolate;
+}
+
+.chart-live-badge {
+  border-color: rgba(52, 211, 153, 0.20);
+  background: rgba(5, 20, 18, 0.74);
+  box-shadow:
+    0 8px 24px rgba(2, 6, 23, 0.16);
+}
+
+/* ------------------------------------------------------------
+   RESEARCH / STRATEGY
+   ------------------------------------------------------------ */
+
+.evidence-card-wrapper,
+.news-sentiment-card {
+  box-shadow: var(--wm-glow);
+}
+
+.signal-bar-fill {
+  background:
+    linear-gradient(
+      90deg,
+      var(--wm-text-soft),
+      var(--wm-text)
+    );
+}
+
+/* ------------------------------------------------------------
+   AI AGENT — COMMAND CENTER
+   ------------------------------------------------------------ */
+
+.agent-command-bar {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(125, 211, 252, 0.16);
+  background:
+    radial-gradient(
+      420px 130px at 0% 50%,
+      rgba(125, 211, 252, 0.055),
+      transparent 70%
+    ),
+    radial-gradient(
+      320px 130px at 100% 50%,
+      rgba(167, 139, 250, 0.055),
+      transparent 70%
+    ),
+    var(--wm-surface);
+}
+
+.agent-command-icon {
+  flex: 0 0 auto;
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.08),
+    0 0 28px rgba(125, 211, 252, 0.06);
+}
+
+.agent-modal {
+  max-height: min(86vh, 820px);
+  overflow: hidden;
+  border-color: rgba(125, 211, 252, 0.16);
+  background:
+    radial-gradient(
+      500px 220px at 0% 0%,
+      rgba(125, 211, 252, 0.045),
+      transparent 72%
+    ),
+    var(--wm-surface-2);
+  box-shadow:
+    0 0 0 1px rgba(125, 211, 252, 0.035),
+    0 50px 120px rgba(2, 6, 23, 0.52);
+}
+
+.agent-overlay {
+  background:
+    radial-gradient(
+      650px 300px at 50% 0%,
+      rgba(125, 211, 252, 0.045),
+      transparent 72%
+    ),
+    rgba(2, 6, 23, 0.78);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+}
+
+.agent-result-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(
+    in srgb,
+    var(--wm-surface-2) 88%,
+    transparent
+  );
+  backdrop-filter: blur(12px);
+}
+
+.agent-answer {
+  scrollbar-width: thin;
+  scrollbar-color:
+    rgba(148, 163, 184, 0.28)
+    transparent;
+}
+
+.agent-answer p {
+  font-size: 10px;
+  line-height: 1.72;
+}
+
+.agent-snapshot {
+  margin-top: 15px;
+}
+
+.snapshot-item {
+  transition:
+    transform 180ms var(--wm-ease),
+    border-color 180ms var(--wm-ease);
+}
+
+.snapshot-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(125, 211, 252, 0.16);
+}
+
+/* Fundamental context cards generated by Phase 3 App.tsx. */
+.agent-fundamental-context {
+  position: relative;
+  margin-top: 15px;
+  padding: 14px;
+  border: 1px solid var(--wm-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--wm-surface-3) 78%, transparent),
+      color-mix(in srgb, var(--wm-surface) 88%, transparent)
+    );
+}
+
+.agent-fundamental-context::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(125, 211, 252, 0.045),
+      transparent 28%
+    );
+}
+
+.agent-context-heading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 11px;
+}
+
+.agent-context-heading span {
+  color: var(--wm-text-muted);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.11em;
+}
+
+.agent-context-heading small {
+  color: var(--wm-text-muted);
+  font-size: 8px;
+}
+
+.agent-context-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.agent-context-grid .snapshot-item {
+  background: color-mix(
+    in srgb,
+    var(--wm-surface-3) 80%,
+    transparent
+  );
+}
+
+/* ------------------------------------------------------------
+   LIGHT MODE
+   ------------------------------------------------------------ */
+
+html[data-theme="light"] .topbar {
+  background:
+    color-mix(
+      in srgb,
+      var(--wm-bg) 82%,
+      transparent
+    );
+}
+
+html[data-theme="light"] .sidebar {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.96),
+      rgba(248, 250, 252, 0.92)
+    );
+  box-shadow: 12px 0 44px rgba(15, 23, 42, 0.055);
+}
+
+html[data-theme="light"] .agent-overlay {
+  background: rgba(15, 23, 42, 0.34);
+}
+
+html[data-theme="light"] .agent-modal {
+  box-shadow:
+    0 0 0 1px rgba(71, 85, 105, 0.08),
+    0 35px 90px rgba(15, 23, 42, 0.18);
+}
+
+html[data-theme="light"] .chart-live-badge {
+  color: #065f5b;
+  background: rgba(236, 253, 245, 0.90);
+}
+
+/* ------------------------------------------------------------
+   MOBILE / TABLET
+   ------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .topbar {
+    position: relative;
+  }
+
+  .content {
+    padding-inline: 18px;
+  }
+
+  .agent-context-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell::before {
+    background-size: 42px 42px;
+  }
+
+  .content {
+    padding: 12px;
+  }
+
+  .topbar {
+    padding: 14px 14px 15px;
+  }
+
+  .symbol-row h1 {
+    font-size: 25px;
+  }
+
+  .overview-card,
+  .terminal-card,
+  .news-sentiment-card {
+    border-radius: 15px;
+  }
+
+  .overview-card {
+    padding: 16px;
+  }
+
+  .overview-mini-grid {
+    gap: 6px;
+    margin-top: 20px;
+  }
+
+  .overview-mini-grid > div {
+    padding: 9px;
+  }
+
+  .chart-wrapper {
+    height: 360px;
+  }
+
+  .agent-command-bar {
+    align-items: flex-start;
+  }
+
+  .agent-command-bar button {
+    white-space: nowrap;
+  }
+
+  .agent-modal {
+    width: 100%;
+    max-height: 91vh;
+    border-radius: 16px;
+  }
+
+  .agent-snapshot,
+  .agent-context-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .agent-answer {
+    max-height: 30vh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

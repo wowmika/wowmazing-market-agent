@@ -5,8 +5,20 @@ import {
   ColorType,
   createChart,
   LineSeries,
+  type MouseEventParams,
   type UTCTimestamp,
 } from "lightweight-charts";
+
+export type CrosshairReadout = {
+  time: number | null;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  ema20: number | null;
+  ema50: number | null;
+  vwap: number | null;
+};
 
 type TradingChartProps = {
   symbol: string;
@@ -15,6 +27,7 @@ type TradingChartProps = {
   showEMA20: boolean;
   showEMA50: boolean;
   showVWAP: boolean;
+  onCrosshairDataChange?: (readout: CrosshairReadout | null) => void;
 };
 
 type Candle = {
@@ -74,16 +87,9 @@ type MarketResponse = {
 
 function normalizeSymbol(
   symbol: string,
-  market: "INDIA" | "GLOBAL" | "INDEX",
 ): string {
   const cleaned =
     symbol.trim().toUpperCase();
-
-  // Global instruments must stay as their exact Yahoo Finance symbol.
-  // Example: AAPL must remain AAPL, not AAPL.NS.
-  if (market === "GLOBAL") {
-    return cleaned;
-  }
 
   if (
     cleaned === "NIFTY 50" ||
@@ -93,9 +99,7 @@ function normalizeSymbol(
   }
 
   if (
-    cleaned === "BANKNIFTY" ||
-    cleaned === "BANK NIFTY" ||
-    cleaned === "NIFTY BANK"
+    cleaned === "BANKNIFTY"
   ) {
     return "^NSEBANK";
   }
@@ -143,6 +147,7 @@ export default function TradingChart({
   showEMA20,
   showEMA50,
   showVWAP,
+  onCrosshairDataChange,
 }: TradingChartProps) {
 
   const containerRef =
@@ -180,7 +185,6 @@ export default function TradingChart({
         const apiSymbol =
           normalizeSymbol(
             symbol,
-            market,
           );
 
         const url =
@@ -339,6 +343,10 @@ export default function TradingChart({
       },
     );
 
+    let ema20Series: any = null;
+    let ema50Series: any = null;
+    let vwapSeries: any = null;
+
 
     // ========================================================
     // CANDLES
@@ -397,7 +405,7 @@ export default function TradingChart({
       marketData.series.ema20.length
     ) {
 
-      const ema20 =
+      ema20Series =
         chart.addSeries(
           LineSeries,
           {
@@ -411,7 +419,7 @@ export default function TradingChart({
           },
         );
 
-      ema20.setData(
+      ema20Series.setData(
         toLineData(
           marketData.series.ema20,
         ),
@@ -428,7 +436,7 @@ export default function TradingChart({
       marketData.series.ema50.length
     ) {
 
-      const ema50 =
+      ema50Series =
         chart.addSeries(
           LineSeries,
           {
@@ -442,7 +450,7 @@ export default function TradingChart({
           },
         );
 
-      ema50.setData(
+      ema50Series.setData(
         toLineData(
           marketData.series.ema50,
         ),
@@ -459,7 +467,7 @@ export default function TradingChart({
       marketData.series.vwap.length
     ) {
 
-      const vwap =
+      vwapSeries =
         chart.addSeries(
           LineSeries,
           {
@@ -475,7 +483,7 @@ export default function TradingChart({
           },
         );
 
-      vwap.setData(
+      vwapSeries.setData(
         toLineData(
           marketData.series.vwap,
         ),
@@ -568,6 +576,43 @@ export default function TradingChart({
 
 
     // ========================================================
+    // CROSSHAIR DATA READOUT
+    // ========================================================
+
+    const handleCrosshairMove = (param: MouseEventParams) => {
+      if (!param.point || param.time === undefined) {
+        onCrosshairDataChange?.(null);
+        return;
+      }
+
+      const candlePoint = param.seriesData.get(candleSeries) as
+        | { open?: number; high?: number; low?: number; close?: number }
+        | undefined;
+      const ema20Point = ema20Series
+        ? (param.seriesData.get(ema20Series) as { value?: number } | undefined)
+        : undefined;
+      const ema50Point = ema50Series
+        ? (param.seriesData.get(ema50Series) as { value?: number } | undefined)
+        : undefined;
+      const vwapPoint = vwapSeries
+        ? (param.seriesData.get(vwapSeries) as { value?: number } | undefined)
+        : undefined;
+
+      onCrosshairDataChange?.({
+        time: typeof param.time === "number" ? param.time : null,
+        open: candlePoint?.open ?? null,
+        high: candlePoint?.high ?? null,
+        low: candlePoint?.low ?? null,
+        close: candlePoint?.close ?? null,
+        ema20: ema20Point?.value ?? null,
+        ema50: ema50Point?.value ?? null,
+        vwap: vwapPoint?.value ?? null,
+      });
+    };
+
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+
+    // ========================================================
     // FIT CONTENT
     // ========================================================
 
@@ -579,6 +624,8 @@ export default function TradingChart({
     // ========================================================
 
     return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
+      onCrosshairDataChange?.(null);
       chart.remove();
     };
 
@@ -587,6 +634,7 @@ export default function TradingChart({
     showEMA20,
     showEMA50,
     showVWAP,
+    onCrosshairDataChange,
   ]);
 
 
@@ -633,7 +681,7 @@ export default function TradingChart({
         !error &&
         marketData && (
           <div className="chart-live-badge">
-            ● {market === "GLOBAL" ? "YAHOO FINANCE MARKET DATA" : "UPSTOX MARKET DATA"}
+            ● UPSTOX MARKET DATA
           </div>
         )}
 
@@ -645,4 +693,4 @@ export default function TradingChart({
 
     </div>
   );
-}[]
+}

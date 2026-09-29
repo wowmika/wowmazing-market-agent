@@ -1,7 +1,9 @@
 ﻿from __future__ import annotations
 
+import json
 import math
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -13,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.providers.upstox import (
     SUPPORTED_TIMEFRAMES,
@@ -168,10 +170,74 @@ class AgentRequest(BaseModel):
     market: str = "INDIA"
 
 
+class AgentMarketView(BaseModel):
+    bias: str = "NEUTRAL"
+    title: str = "Neutral / mixed"
+    summary: str = ""
+
+
+class AgentSetupStatus(BaseModel):
+    status: str = "WAIT"
+    technical_evidence_strength: float | None = None
+    technical_evidence_basis: str = (
+        "Derived only from the deterministic technical directional score; fundamentals are not included."
+    )
+
+
+class AgentTechnicalRead(BaseModel):
+    rsi: float | None = None
+    vwap: float | None = None
+    ema20: float | None = None
+    atr: float | None = None
+    macd: float | None = None
+    volume_ratio: float | None = None
+    price_vs_vwap_pct: float | None = None
+    price_vs_ema20_pct: float | None = None
+    ema20_vs_ema50_pct: float | None = None
+
+
+class AgentFundamentalContext(BaseModel):
+    name: str | None = None
+    provider: str | None = None
+    currency: str | None = None
+    trailing_pe: float | None = None
+    trailing_eps: float | None = None
+    revenue_growth: float | None = None
+    market_cap: float | None = None
+    dividend_yield: float | None = None
+
+
+class AgentRisk(BaseModel):
+    title: str = "Risk / invalidation"
+    summary: str = ""
+    invalidation: list[str] = Field(default_factory=list)
+
+
+class AgentContext(BaseModel):
+    provider: str = "Unknown"
+    timeframe: str = "—"
+    exchange: str = "—"
+    latest_candle_timestamp: str | None = None
+    market: str = "—"
+
+
+class AgentBrief(BaseModel):
+    version: str = "1.0"
+    market_view: AgentMarketView
+    setup_status: AgentSetupStatus
+    technical_read: AgentTechnicalRead
+    fundamental_context: AgentFundamentalContext
+    catalysts: list[str] = Field(default_factory=list)
+    risk: AgentRisk
+    context: AgentContext
+
+
 class AgentResponse(BaseModel):
     success: bool
     answer: str
     market_snapshot: dict[str, Any]
+    fundamentals: dict[str, Any] | None = None
+    brief: AgentBrief | None = None
     ai_used: bool
     error: str | None = None
 
@@ -1718,83 +1784,415 @@ def build_market_analysis(
 # OPTIONAL AI EXPLANATION
 # ============================================================
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return numeric
+
+
+def _pct_delta(
+    current: Any,
+    reference: Any,
+) -> float | None:
+    current_value = _safe_float(current)
+    reference_value = _safe_float(reference)
+    if current_value is None or reference_value in (None, 0):
+        return None
+    return round(
+        ((current_value - reference_value) / reference_value) * 100,
+        4,
+    )
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    """Extract the first valid JSON object from an LLM response."""
+    if not text:
+        return None
+
+    cleaned = text.strip()
+
+    fenced = re.search(
+        r"```(?:json)?\s*(\{.*?\})\s*```",
+        cleaned,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    candidates: list[str] = []
+    if fenced:
+        candidates.append(fenced.group(1))
+
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", cleaned):
+        try:
+            payload, _ = decoder.raw_decode(cleaned[match.start():])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            candidates.append(json.dumps(payload))
+            break
+
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+
+    return None
+
+
+def _clean_string_list(value: Any, limit: int = 6) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def build_agent_brief(
+    analysis: dict[str, Any],
+    fundamentals: dict[str, Any] | None,
+    ai_payload: dict[str, Any] | None = None,
+) -> AgentBrief:
+    """
+    Build the structured agent brief.
+
+    Numeric/market/fundamental fields remain source-locked to the deterministic
+    engines. The AI payload can contribute narrative wording, catalysts and
+    risk language, but cannot override source values or create a combined score.
+    """
+    fundamentals = fundamentals or {}
+    ai_payload = ai_payload or {}
+
+    trend = str(analysis.get("trend") or "MIXED").upper()
+    bias = (
+        "BULLISH"
+        if trend == "BULLISH"
+        else "BEARISH"
+        if trend == "BEARISH"
+        else "NEUTRAL"
+    )
+
+    bullish_score = _safe_float(analysis.get("bullish_score")) or 0.0
+    bearish_score = _safe_float(analysis.get("bearish_score")) or 0.0
+    technical_evidence_strength = round(
+        max(0.0, min(10.0, max(bullish_score, bearish_score))),
+        1,
+    )
+
+    ai_market = ai_payload.get("market_view")
+    if not isinstance(ai_market, dict):
+        ai_market = {}
+
+    ai_setup = ai_payload.get("setup_status")
+    if not isinstance(ai_setup, dict):
+        ai_setup = {}
+
+    ai_risk = ai_payload.get("risk")
+    if not isinstance(ai_risk, dict):
+        ai_risk = {}
+
+    ai_technical = ai_payload.get("technical_read")
+    if not isinstance(ai_technical, dict):
+        ai_technical = {}
+
+    ai_fundamentals = ai_payload.get("fundamental_context")
+    if not isinstance(ai_fundamentals, dict):
+        ai_fundamentals = {}
+
+    ai_context = ai_payload.get("context")
+    if not isinstance(ai_context, dict):
+        ai_context = {}
+
+    reasons = analysis.get("reasons") or []
+    if not isinstance(reasons, list):
+        reasons = []
+
+    catalysts = _clean_string_list(ai_payload.get("catalysts"))
+    if not catalysts:
+        catalysts = _clean_string_list(reasons, limit=4)
+
+    support = analysis.get("support")
+    resistance = analysis.get("resistance")
+    atr = analysis.get("atr")
+
+    invalidation = _clean_string_list(ai_risk.get("invalidation"), limit=4)
+    if not invalidation:
+        invalidation = [
+            (
+                f"Support reference: {support}"
+                if support is not None
+                else "Monitor the nearest structural support."
+            ),
+            (
+                f"Resistance reference: {resistance}"
+                if resistance is not None
+                else "Monitor the nearest structural resistance."
+            ),
+            (
+                f"ATR reference: {atr}"
+                if atr is not None
+                else "Reassess volatility with fresh data."
+            ),
+        ]
+
+    risk_summary = str(ai_risk.get("summary") or "").strip()
+    if not risk_summary:
+        risk_summary = (
+            "Use the technical levels and setup state as invalidation references. "
+            "This analysis does not guarantee future outcomes."
+        )
+
+    market_summary = str(ai_market.get("summary") or "").strip()
+    if not market_summary:
+        market_summary = (
+            f"The deterministic technical engine currently classifies the market as {bias.lower()}."
+        )
+
+    title = str(ai_market.get("title") or "").strip()
+    if not title:
+        title = "Neutral / mixed" if bias == "NEUTRAL" else f"{bias} technical bias"
+
+    setup_status = str(analysis.get("signal") or ai_setup.get("status") or "WAIT")
+    provider = str(
+        analysis.get("data_provider")
+        or fundamentals.get("provider")
+        or "Unknown"
+    )
+
+    brief = AgentBrief(
+        version="1.0",
+        market_view=AgentMarketView(
+            bias=bias,
+            title=title,
+            summary=market_summary,
+        ),
+        setup_status=AgentSetupStatus(
+            status=setup_status,
+            technical_evidence_strength=technical_evidence_strength,
+            technical_evidence_basis=(
+                "Derived only from the deterministic technical directional score; fundamentals are not included."
+            ),
+        ),
+        technical_read=AgentTechnicalRead(
+            rsi=_safe_float(analysis.get("rsi")),
+            vwap=_safe_float(analysis.get("vwap")),
+            ema20=_safe_float(analysis.get("ema20")),
+            atr=_safe_float(analysis.get("atr")),
+            macd=_safe_float(analysis.get("macd")),
+            volume_ratio=_safe_float(analysis.get("volume_ratio")),
+            price_vs_vwap_pct=_pct_delta(
+                analysis.get("price"),
+                analysis.get("vwap"),
+            ),
+            price_vs_ema20_pct=_pct_delta(
+                analysis.get("price"),
+                analysis.get("ema20"),
+            ),
+            ema20_vs_ema50_pct=_pct_delta(
+                analysis.get("ema20"),
+                analysis.get("ema50"),
+            ),
+        ),
+        fundamental_context=AgentFundamentalContext(
+            name=fundamentals.get("name"),
+            provider=fundamentals.get("provider"),
+            currency=fundamentals.get("currency"),
+            trailing_pe=_safe_float(fundamentals.get("trailing_pe")),
+            trailing_eps=_safe_float(fundamentals.get("trailing_eps")),
+            revenue_growth=_safe_float(fundamentals.get("revenue_growth")),
+            market_cap=_safe_float(fundamentals.get("market_cap")),
+            dividend_yield=_safe_float(fundamentals.get("dividend_yield")),
+        ),
+        catalysts=catalysts,
+        risk=AgentRisk(
+            title=str(ai_risk.get("title") or "Risk / invalidation"),
+            summary=risk_summary,
+            invalidation=invalidation,
+        ),
+        context=AgentContext(
+            provider=provider,
+            timeframe=str(analysis.get("timeframe") or ai_context.get("timeframe") or "—"),
+            exchange=str(
+                analysis.get("exchange")
+                or fundamentals.get("exchange")
+                or "—"
+            ),
+            latest_candle_timestamp=(
+                str(analysis.get("latest_candle_timestamp"))
+                if analysis.get("latest_candle_timestamp")
+                else None
+            ),
+            market=str(
+                analysis.get("market")
+                or fundamentals.get("market")
+                or "—"
+            ),
+        ),
+    )
+
+    # Explicitly ignore AI-provided numeric technical/fundamental values.
+    # This preserves source integrity and keeps the AI in the explanation layer.
+    _ = ai_technical
+    _ = ai_fundamentals
+
+    return brief
+
+
+def render_agent_brief(
+    brief: AgentBrief,
+    analysis: dict[str, Any],
+) -> str:
+    technical = brief.technical_read
+    fundamentals = brief.fundamental_context
+
+    lines = [
+        "MARKET VIEW",
+        brief.market_view.summary,
+        "",
+        "SETUP STATUS",
+        brief.setup_status.status,
+        "",
+        "PRICE",
+        f"{analysis.get('currency') or ''} {analysis.get('price', 0):,.2f}",
+        "",
+        "TECHNICAL CONTEXT",
+        f"RSI {technical.rsi if technical.rsi is not None else 'Unavailable'} · "
+        f"VWAP {technical.vwap if technical.vwap is not None else 'Unavailable'} · "
+        f"EMA20 {technical.ema20 if technical.ema20 is not None else 'Unavailable'} · "
+        f"ATR {technical.atr if technical.atr is not None else 'Unavailable'}",
+        "",
+        "FUNDAMENTAL CONTEXT",
+        f"P/E {fundamentals.trailing_pe if fundamentals.trailing_pe is not None else 'Unavailable'} · "
+        f"EPS {fundamentals.trailing_eps if fundamentals.trailing_eps is not None else 'Unavailable'} · "
+        f"Revenue Growth {fundamentals.revenue_growth if fundamentals.revenue_growth is not None else 'Unavailable'}% · "
+        f"Market Cap {fundamentals.market_cap if fundamentals.market_cap is not None else 'Unavailable'} · "
+        f"Dividend Yield {fundamentals.dividend_yield if fundamentals.dividend_yield is not None else 'Unavailable'}%",
+        "",
+        "RISK CONSIDERATIONS",
+        brief.risk.summary,
+        "",
+        "WHAT TO MONITOR NEXT",
+    ]
+    lines.extend(f"• {item}" for item in brief.catalysts)
+    return "\n".join(lines)
+
+
 def generate_ai_explanation(
     command: str,
     analysis: dict[str, Any],
-) -> tuple[str, bool]:
-
-    api_key = os.getenv(
-        "OPENAI_API_KEY"
-    )
-
+    fundamentals: dict[str, Any] | None = None,
+) -> tuple[str, bool, dict[str, Any] | None]:
+    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-
         return (
-            "AI explanation is unavailable because "
-            "OPENAI_API_KEY is not configured.",
+            "AI explanation is unavailable because OPENAI_API_KEY is not configured.",
             False,
+            None,
         )
 
-    model = os.getenv(
-        "OPENAI_MODEL",
-        "gpt-5.6-luna",
-    )
+    model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+    fundamentals = fundamentals or {}
 
     try:
-
-        client = OpenAI(
-            api_key=api_key
-        )
+        client = OpenAI(api_key=api_key)
 
         instructions = """
 You are the explanation layer of WOWMAZING Market Agent.
 
-The numerical analysis has already been produced by
-the deterministic market engine.
+The deterministic market engine has already calculated the numerical market data.
+The fundamentals feed has already supplied company data.
 
-Use the supplied numbers only.
+Use only supplied information. Do not invent missing values.
+Do not create a combined technical + fundamental score.
+Do not change or reinterpret source numeric values.
+Do not guarantee returns or profits.
+Do not present historical strategy results as probabilities for the next trade.
+Keep technical evidence, fundamental context, and historical evidence conceptually distinct.
 
-Do not invent data.
-Do not guarantee returns.
-Do not claim a setup will be profitable.
-Do not present scores as probabilities.
+Return ONLY valid JSON. No markdown fences. Use exactly this shape:
+{
+  "version":"1.0",
+  "market_view":{"bias":"BULLISH|BEARISH|NEUTRAL","title":"string","summary":"string"},
+  "setup_status":{"status":"string","technical_evidence_strength":null,"technical_evidence_basis":"string"},
+  "technical_read":{},
+  "fundamental_context":{},
+  "catalysts":["string"],
+  "risk":{"title":"string","summary":"string","invalidation":["string"]},
+  "context":{"provider":"string","timeframe":"string","exchange":"string","latest_candle_timestamp":null,"market":"string"}
+}
 
-Explain:
-- market view
-- technical evidence
-- setup status
-- risk considerations
-- what to monitor next
+The server will source-lock the numeric fields from the deterministic engines. Your job is to provide clear narrative wording, catalysts, risk framing, and monitor-next language.
+The technical_evidence_strength must be left null; the server computes that value from the deterministic technical directional score only.
+"""
+
+        fundamental_context = f"""
+Fundamental provider: {fundamentals.get('provider', 'Unavailable')}
+Company: {fundamentals.get('name', 'Unavailable')}
+Sector: {fundamentals.get('sector', 'Unavailable')}
+Industry: {fundamentals.get('industry', 'Unavailable')}
+Currency: {fundamentals.get('currency', 'Unavailable')}
+Trailing P/E: {fundamentals.get('trailing_pe', 'Unavailable')}
+Forward P/E: {fundamentals.get('forward_pe', 'Unavailable')}
+Price / Book: {fundamentals.get('price_to_book', 'Unavailable')}
+Market Cap: {fundamentals.get('market_cap', 'Unavailable')}
+Enterprise Value: {fundamentals.get('enterprise_value', 'Unavailable')}
+Trailing EPS: {fundamentals.get('trailing_eps', 'Unavailable')}
+Revenue: {fundamentals.get('revenue', 'Unavailable')}
+Revenue Growth: {fundamentals.get('revenue_growth', 'Unavailable')}
+Profit Margin: {fundamentals.get('profit_margin', 'Unavailable')}
+Operating Margin: {fundamentals.get('operating_margin', 'Unavailable')}
+Dividend Yield: {fundamentals.get('dividend_yield', 'Unavailable')}
+Beta: {fundamentals.get('beta', 'Unavailable')}
+Debt / Equity: {fundamentals.get('debt_to_equity', 'Unavailable')}
+Return on Equity: {fundamentals.get('return_on_equity', 'Unavailable')}
+52 Week Low: {fundamentals.get('fifty_two_week_low', 'Unavailable')}
+52 Week High: {fundamentals.get('fifty_two_week_high', 'Unavailable')}
 """
 
         prompt = f"""
 User command:
 {command}
 
-Engine result:
+TECHNICAL ENGINE RESULT
+Symbol: {analysis.get('symbol')}
+Timeframe: {analysis.get('timeframe')}
+Price: {analysis.get('price')}
+Change %: {analysis.get('change_pct')}
+Trend: {analysis.get('trend')}
+Signal: {analysis.get('signal')}
+Bullish score: {analysis.get('bullish_score')}
+Bearish score: {analysis.get('bearish_score')}
+RSI: {analysis.get('rsi')}
+EMA20: {analysis.get('ema20')}
+EMA50: {analysis.get('ema50')}
+EMA200: {analysis.get('ema200')}
+MACD: {analysis.get('macd')}
+MACD signal: {analysis.get('macd_signal')}
+VWAP: {analysis.get('vwap')}
+ATR: {analysis.get('atr')}
+Support: {analysis.get('support')}
+Resistance: {analysis.get('resistance')}
+Volume ratio: {analysis.get('volume_ratio')}
+Latest candle timestamp: {analysis.get('latest_candle_timestamp')}
+Provider: {analysis.get('data_provider')}
+Market: {analysis.get('market')}
+Exchange: {analysis.get('exchange')}
 
-Symbol: {analysis["symbol"]}
-Timeframe: {analysis["timeframe"]}
-Price: {analysis["price"]}
-Change %: {analysis["change_pct"]}
-Trend: {analysis["trend"]}
-Signal: {analysis["signal"]}
-Bullish score: {analysis["bullish_score"]}
-Bearish score: {analysis["bearish_score"]}
-RSI: {analysis["rsi"]}
-EMA20: {analysis["ema20"]}
-EMA50: {analysis["ema50"]}
-EMA200: {analysis["ema200"]}
-MACD: {analysis["macd"]}
-MACD signal: {analysis["macd_signal"]}
-VWAP: {analysis["vwap"]}
-ATR: {analysis["atr"]}
-Support: {analysis["support"]}
-Resistance: {analysis["resistance"]}
-Volume ratio: {analysis["volume_ratio"]}
+REASONS
+{analysis.get('reasons')}
 
-Reasons:
-{analysis["reasons"]}
+FUNDAMENTAL CONTEXT
+{fundamental_context}
 """
 
         response = client.responses.create(
@@ -1803,22 +2201,19 @@ Reasons:
             input=prompt,
         )
 
+        payload = _extract_json_object(response.output_text)
         return (
             response.output_text,
             True,
+            payload,
         )
 
     except Exception as error:
-
-        print(
-            "AI unavailable:",
-            error,
-        )
-
+        print("AI unavailable:", error)
         return (
-            "AI explanation is temporarily unavailable. "
-            "The deterministic market analysis is still available.",
+            "AI explanation is temporarily unavailable. The deterministic market analysis is still available.",
             False,
+            None,
         )
 
 
@@ -2508,11 +2903,42 @@ def agent(
             quote,
         )
 
-        ai_answer, ai_used = (
+        # Fundamentals are additional research context.
+        # Failure here must not break the technical agent.
+        try:
+
+            fundamentals = get_fundamentals(
+                request.symbol,
+                request.market,
+            )
+
+        except Exception as fundamentals_error:
+
+            print(
+                "Fundamentals unavailable for agent:",
+                fundamentals_error,
+            )
+
+            fundamentals = {
+                "success": False,
+                "supported": False,
+                "message": (
+                    "Fundamentals could not be loaded."
+                ),
+            }
+
+        ai_answer, ai_used, ai_payload = (
             generate_ai_explanation(
                 request.command,
                 analysis,
+                fundamentals,
             )
+        )
+
+        brief = build_agent_brief(
+            analysis,
+            fundamentals,
+            ai_payload,
         )
 
         fallback = (
@@ -2546,17 +2972,46 @@ TECHNICAL EVIDENCE
                     "reasons"
                 ]
             )
-            + """
+            + f"""
+
+FUNDAMENTAL CONTEXT
+
+COMPANY
+{fundamentals.get("name", "Unavailable")}
+
+TTM P/E
+{fundamentals.get("trailing_pe", "Unavailable")}
+
+FORWARD P/E
+{fundamentals.get("forward_pe", "Unavailable")}
+
+EPS (TTM)
+{fundamentals.get("trailing_eps", "Unavailable")}
+
+REVENUE GROWTH
+{fundamentals.get("revenue_growth", "Unavailable")}
+
+PROFIT MARGIN
+{fundamentals.get("profit_margin", "Unavailable")}
+
+DIVIDEND YIELD
+{fundamentals.get("dividend_yield", "Unavailable")}
+
+DEBT / EQUITY
+{fundamentals.get("debt_to_equity", "Unavailable")}
+
+FUNDAMENTAL DATA PROVIDER
+{fundamentals.get("provider", "Unavailable")}
 
 RISK NOTE
-This is technical research based on
-available market data. It does not
+This is research based on the supplied
+market and company data. It does not
 guarantee future returns or profits.
 """
         )
 
         final_answer = (
-            ai_answer
+            render_agent_brief(brief, analysis)
             if ai_used
             else fallback
         )
@@ -2565,6 +3020,8 @@ guarantee future returns or profits.
             success=True,
             answer=final_answer,
             market_snapshot=analysis,
+            fundamentals=fundamentals,
+            brief=brief,
             ai_used=ai_used,
             error=None,
         )
@@ -2575,6 +3032,9 @@ guarantee future returns or profits.
             success=False,
             answer="",
             market_snapshot={},
+            fundamentals=None,
+            brief=None,
             ai_used=False,
             error=str(error),
         )
+
