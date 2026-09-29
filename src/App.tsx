@@ -97,6 +97,39 @@ type AgentResponse = {
 };
 
 
+
+type FundamentalsData = {
+  success: boolean;
+  supported: boolean;
+  message?: string;
+  provider?: string;
+  symbol?: string;
+  resolved_symbol?: string;
+  market?: string;
+  retrieved_at?: string;
+  name?: string;
+  sector?: string | null;
+  industry?: string | null;
+  currency?: string;
+  exchange?: string;
+  trailing_pe?: number | null;
+  forward_pe?: number | null;
+  price_to_book?: number | null;
+  market_cap?: number | null;
+  enterprise_value?: number | null;
+  trailing_eps?: number | null;
+  revenue?: number | null;
+  revenue_growth?: number | null;
+  profit_margin?: number | null;
+  operating_margin?: number | null;
+  dividend_yield?: number | null;
+  beta?: number | null;
+  debt_to_equity?: number | null;
+  return_on_equity?: number | null;
+  fifty_two_week_low?: number | null;
+  fifty_two_week_high?: number | null;
+};
+
 type StrategyEvidenceApiResponse = StrategyEvidenceData & {
   market_context?: {
     requested_symbol?: string;
@@ -115,7 +148,6 @@ type StrategyEvidenceApiResponse = StrategyEvidenceData & {
     provider?: string;
   };
 };
-
 
 // ============================================================
 // CURRENCY HELPERS
@@ -157,6 +189,20 @@ function inferCurrencyFromSymbol(
   // selected through universal search carries market metadata, so
   // only then should an unsuffixed symbol fall back to USD.
   return market === "GLOBAL" ? "USD" : "INR";
+}
+
+function formatCompactMoney(
+  value: number,
+  currency: string,
+): string {
+  const normalized = currency.toUpperCase();
+  const symbol =
+    CURRENCY_SYMBOLS[normalized] || `${normalized} `;
+
+  return `${symbol}${value.toLocaleString("en-IN", {
+    notation: "compact",
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function formatMoney(value: number, currency: string): string {
@@ -245,6 +291,15 @@ function App() {
     useState(false);
 
   const [strategyEvidenceError, setStrategyEvidenceError] =
+    useState("");
+
+  const [fundamentals, setFundamentals] =
+    useState<FundamentalsData | null>(null);
+
+  const [fundamentalsLoading, setFundamentalsLoading] =
+    useState(false);
+
+  const [fundamentalsError, setFundamentalsError] =
     useState("");
 
   // Responsive navigation drawer state.
@@ -410,6 +465,74 @@ function App() {
     },
     [refreshStrategyEvidence],
   );
+
+  // ==========================================================
+  // FUNDAMENTALS
+  // ==========================================================
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadFundamentals = async () => {
+      setFundamentalsLoading(true);
+      setFundamentalsError("");
+
+      try {
+        const response = await fetch(
+          `${API_BASE_URL}/fundamentals?symbol=${encodeURIComponent(
+            symbol,
+          )}&market=${encodeURIComponent(
+            instrumentMeta.market,
+          )}`,
+          {
+            signal: controller.signal,
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            `Backend returned HTTP ${response.status}.`,
+          );
+        }
+
+        const data =
+          (await response.json()) as FundamentalsData;
+
+        if (!controller.signal.aborted) {
+          setFundamentals(data);
+
+          if (
+            data.currency &&
+            instrumentMeta.market === "GLOBAL"
+          ) {
+            setCurrency(data.currency);
+          }
+        }
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setFundamentals(null);
+        setFundamentalsError(
+          error instanceof Error
+            ? error.message
+            : "Unable to load fundamentals.",
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setFundamentalsLoading(false);
+        }
+      }
+    };
+
+    void loadFundamentals();
+
+    return () => {
+      controller.abort();
+    };
+  }, [symbol, instrumentMeta.market]);
+
 
   // Close the mobile navigation with Escape and prevent the
   // page from scrolling behind the open drawer.
@@ -960,69 +1083,103 @@ function App() {
               </div>
 
               <span className="section-note">
-                Fundamentals fields require a
-                fundamentals feed.
+                {fundamentalsLoading
+                  ? "Loading company fundamentals…"
+                  : fundamentalsError
+                    ? fundamentalsError
+                    : fundamentals?.supported
+                      ? `Source: ${
+                          fundamentals.provider ||
+                          "fundamentals feed"
+                        }`
+                      : fundamentals?.message ||
+                        "Fundamentals unavailable for this instrument."}
               </span>
             </div>
 
             <div className="key-metrics-grid">
               <Metric
-                label="P / E"
-                value="—"
-                detail="Fundamentals unavailable"
+                label="TTM P / E"
+                value={
+                  fundamentals?.trailing_pe != null
+                    ? fundamentals.trailing_pe.toFixed(2)
+                    : "—"
+                }
+                detail={
+                  fundamentals?.forward_pe != null
+                    ? `Forward P/E ${fundamentals.forward_pe.toFixed(2)}`
+                    : "Valuation"
+                }
               />
 
               <Metric
                 label="MARKET CAP"
-                value="—"
-                detail="Fundamentals unavailable"
+                value={
+                  fundamentals?.market_cap != null
+                    ? formatCompactMoney(
+                        fundamentals.market_cap,
+                        fundamentals.currency || currency,
+                      )
+                    : "—"
+                }
+                detail={
+                  fundamentals?.name ||
+                  "Equity valuation"
+                }
               />
 
               <Metric
                 label="52W RANGE"
-                value="—"
-                detail="Fundamentals unavailable"
-              />
-
-              <Metric
-                label="RSI"
                 value={
-                  snapshot.rsi !==
-                  undefined
-                    ? snapshot.rsi.toFixed(
-                        2,
-                      )
+                  fundamentals?.fifty_two_week_low != null &&
+                  fundamentals?.fifty_two_week_high != null
+                    ? `${formatMoney(
+                        fundamentals.fifty_two_week_low,
+                        fundamentals.currency || currency,
+                      )} – ${formatMoney(
+                        fundamentals.fifty_two_week_high,
+                        fundamentals.currency || currency,
+                      )}`
                     : "—"
                 }
-                detail="Momentum"
+                detail={
+                  fundamentals?.exchange ||
+                  fundamentals?.resolved_symbol ||
+                  "Price range"
+                }
               />
 
               <Metric
-                label="EMA 20"
+                label="EPS (TTM)"
                 value={
-                  snapshot.ema20 !==
-                  undefined
+                  fundamentals?.trailing_eps != null
                     ? formatMoney(
-                        snapshot.ema20,
-                        currency,
+                        fundamentals.trailing_eps,
+                        fundamentals.currency || currency,
                       )
                     : "—"
                 }
-                detail="Trend"
+                detail="Per-share earnings"
               />
 
               <Metric
-                label="EMA 50"
+                label="REVENUE GROWTH"
                 value={
-                  snapshot.ema50 !==
-                  undefined
-                    ? formatMoney(
-                        snapshot.ema50,
-                        currency,
-                      )
+                  fundamentals?.revenue_growth != null
+                    ? `${fundamentals.revenue_growth.toFixed(2)}%`
                     : "—"
                 }
-                detail="Trend"
+                detail="Year-over-year"
+              />
+
+              <Metric
+                label="DIVIDEND YIELD"
+                value={
+                  fundamentals?.dividend_yield != null
+                    ? `${fundamentals.dividend_yield.toFixed(2)}%`
+                    : "—"
+                }
+                detail="Trailing yield"
               />
             </div>
           </section>

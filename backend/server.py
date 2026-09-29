@@ -25,6 +25,9 @@ from backend.strategy_engine import (
     DEFAULT_STRATEGY,
     analyze_strategy,
 )
+from backend.fundamentals import (
+    get_fundamentals,
+)
 
 
 # ============================================================
@@ -2324,6 +2327,27 @@ def watchlist_quotes() -> dict[str, Any]:
             else "yfinance"
         ),
     }
+
+
+@app.get("/fundamentals")
+def fundamentals(
+    symbol: str = Query("RELIANCE"),
+    market: str = Query("INDIA"),
+) -> dict[str, Any]:
+    """Return company fundamentals for the selected instrument."""
+
+    try:
+        return get_fundamentals(
+            symbol,
+            market,
+        )
+
+    except Exception as error:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error),
+        ) from error
 
 
 @app.get("/strategy/evidence")
