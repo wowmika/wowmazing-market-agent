@@ -645,4 +645,4 @@ export default function TradingChart({
 
     </div>
   );
-}
+}[]
