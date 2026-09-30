@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
+    "@mlc-ai/web-llm": "^0.2.85",
     "@orama/orama": "^3.1.18",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
