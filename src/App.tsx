@@ -25,6 +25,11 @@ import StrategyEvidence, {
   StrategyEvidenceData,
 } from "./StrategyEvidence";
 import LearningCenter from "./LearningCenter";
+import ResearchEvidencePanel from "./components/ResearchEvidencePanel";
+import {
+  createResearchRetriever,
+  type RetrievedEvidence,
+} from "./ai/retrieval";
 
 import "./App.css";
 import "./responsive.css";
@@ -568,6 +573,15 @@ function App() {
   const [agentAnswer, setAgentAnswer] =
     useState("");
 
+  const [agentEvidence, setAgentEvidence] =
+    useState<RetrievedEvidence[]>([]);
+
+  const [agentRetrievalRuntime, setAgentRetrievalRuntime] =
+    useState<"webgpu" | "wasm" | null>(null);
+
+  const [agentRetrievalLoading, setAgentRetrievalLoading] =
+    useState(false);
+
   const [agentFundamentals, setAgentFundamentals] =
     useState<FundamentalsData | null>(null);
   const [agentBrief, setAgentBrief] =
@@ -916,6 +930,9 @@ function App() {
 
     setCommand(starterCommand);
     setAgentAnswer("");
+    setAgentEvidence([]);
+    setAgentRetrievalRuntime(null);
+    setAgentRetrievalLoading(false);
     setAgentFundamentals(null);
     setAgentBrief(null);
     setAgentLatencyMs(null);
@@ -960,6 +977,9 @@ function App() {
 
     setAgentLoading(true);
     setAgentAnswer("");
+    setAgentEvidence([]);
+    setAgentRetrievalRuntime(null);
+    setAgentRetrievalLoading(false);
     setAgentBrief(null);
     setAgentActionFeedback("");
     setAgentTechnicalExpanded(false);
@@ -1032,6 +1052,58 @@ function App() {
       setSnapshot(
         nextSnapshot,
       );
+
+      // ========================================================
+      // PHASE 2 — BROWSER LOCAL RETRIEVAL
+      // ========================================================
+      // The backend remains authoritative for market numbers,
+      // indicators, fundamentals, and strategy data. The browser
+      // creates a local evidence index and retrieves the material
+      // most relevant to the user query.
+      setAgentRetrievalLoading(true);
+
+      void (async () => {
+        try {
+          const retriever =
+            await createResearchRetriever({
+              command: cleanCommand,
+              market_snapshot: nextSnapshot,
+              fundamentals: nextFundamentals,
+              strategy_evidence: strategyEvidence
+                ? (strategyEvidence as unknown as Record<string, unknown>)
+                : null,
+            });
+
+          const retrievedEvidence =
+            await retriever.search(
+              cleanCommand,
+              {
+                limit: 8,
+                symbol:
+                  typeof nextSnapshot.symbol === "string"
+                    ? nextSnapshot.symbol
+                    : undefined,
+              },
+            );
+
+          setAgentEvidence(
+            retrievedEvidence,
+          );
+          setAgentRetrievalRuntime(
+            retriever.runtime,
+          );
+        } catch (retrievalError) {
+          console.error(
+            "WOWMAZING browser retrieval failed:",
+            retrievalError,
+          );
+          setAgentEvidence([]);
+          setAgentRetrievalRuntime(null);
+        } finally {
+          setAgentRetrievalLoading(false);
+        }
+      })();
+
       setAgentBrief(
         parseAgentBrief(
           data.answer || "",
@@ -2280,6 +2352,12 @@ function App() {
                     </div>
                   </section>
 
+                  <ResearchEvidencePanel
+                    evidence={agentEvidence}
+                    runtime={agentRetrievalRuntime}
+                    loading={agentRetrievalLoading}
+                  />
+
                   <section className="agent-terminal-section">
                     <div className="agent-section-heading">
                       <div>
@@ -2451,6 +2529,9 @@ function App() {
                         type="button"
                         onClick={() => {
                           setAgentAnswer("");
+                          setAgentEvidence([]);
+                          setAgentRetrievalRuntime(null);
+                          setAgentRetrievalLoading(false);
                           setAgentBrief(null);
                           setAgentFundamentals(null);
                           setAgentAiUsed(false);
