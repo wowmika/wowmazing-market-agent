@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -26,15 +26,30 @@ import StrategyEvidence, {
 } from "./StrategyEvidence";
 import LearningCenter from "./LearningCenter";
 import ResearchEvidencePanel from "./components/ResearchEvidencePanel";
-import {
-  createResearchRetriever,
-  type RetrievedEvidence,
-} from "./ai/retrieval";
+import type { RetrievedEvidence } from "./ai/retrieval/types";
+import type { LocalAgentResult } from "./ai/local/sourceLockedAgent";
+import type { LocalLLMProgress } from "./ai/local/webllmRuntime";
 
 import "./App.css";
 import "./responsive.css";
 import "./AgentTerminal.css";
 import { API_BASE_URL } from "./config";
+
+let localRuntimeLoaded = false;
+
+function isLocalLLMAvailable(): boolean {
+  return typeof navigator !== "undefined" && "gpu" in navigator && typeof Worker !== "undefined";
+}
+
+function resetLocalLLM(): void {
+  if (!localRuntimeLoaded) return;
+  // The wrapper is loaded only if a local session may have created a worker.
+  void import("./ai/local/webllmRuntime")
+    .then(({ resetLocalLLM: reset }) => reset())
+    .catch((error: unknown) => {
+      console.warn("Could not reset the local AI worker:", error);
+    });
+}
 
 
 // ============================================================
@@ -164,6 +179,18 @@ type AgentBrief = {
 };
 
 type AgentResponseWithBrief = AgentResponse & { brief?: AgentBrief | null };
+type LocalAgentStatus = "unavailable" | "ready" | "loading" | "generating" | "completed" | "failed";
+
+function getLocalAgentStatusLabel(status: LocalAgentStatus): string {
+  switch (status) {
+    case "unavailable": return "UNAVAILABLE";
+    case "ready": return "READY · LOADS ON REQUEST";
+    case "loading": return "LOADING MODEL";
+    case "generating": return "GENERATING NARRATIVE";
+    case "completed": return "COMPLETED";
+    case "failed": return "FAILED";
+  }
+}
 
 function normalizeAgentBias(value: unknown): AgentBias {
   const normalized = String(value || "").trim().toUpperCase();
@@ -613,6 +640,17 @@ function App() {
   const [agentError, setAgentError] =
     useState("");
 
+  const [localAgentResult, setLocalAgentResult] =
+    useState<LocalAgentResult | null>(null);
+  const [localAgentStatus, setLocalAgentStatus] =
+    useState<LocalAgentStatus>(() => isLocalLLMAvailable() ? "ready" : "unavailable");
+  const localAgentLoading = localAgentStatus === "loading" || localAgentStatus === "generating";
+  const [localAgentProgress, setLocalAgentProgress] =
+    useState<LocalLLMProgress | null>(null);
+  const [localAgentError, setLocalAgentError] =
+    useState("");
+  const localAgentRequestId = useRef(0);
+
   const [snapshot, setSnapshot] =
     useState<
       AgentResponse["market_snapshot"]
@@ -928,6 +966,9 @@ function App() {
     starterCommand = "",
   ) => {
 
+    localAgentRequestId.current += 1;
+    resetLocalLLM();
+
     setCommand(starterCommand);
     setAgentAnswer("");
     setAgentEvidence([]);
@@ -943,6 +984,10 @@ function App() {
     setAgentTechnicalExpanded(false);
     setAgentChecks({});
     setAgentError("");
+    setLocalAgentResult(null);
+    setLocalAgentStatus(isLocalLLMAvailable() ? "ready" : "unavailable");
+    setLocalAgentProgress(null);
+    setLocalAgentError("");
     setAgentOpen(true);
   };
 
@@ -953,6 +998,12 @@ function App() {
       return;
     }
 
+    localAgentRequestId.current += 1;
+    resetLocalLLM();
+    setLocalAgentStatus(isLocalLLMAvailable() ? "ready" : "unavailable");
+    setLocalAgentProgress(null);
+    setLocalAgentError("");
+
     setAgentOpen(false);
   };
 
@@ -962,6 +1013,8 @@ function App() {
   ) => {
 
     event?.preventDefault();
+
+    if (localAgentLoading) return;
 
     const cleanCommand =
       command.trim();
@@ -986,6 +1039,10 @@ function App() {
     setAgentAuditExpanded(false);
     setAgentChecks({});
     setAgentError("");
+    setLocalAgentResult(null);
+    setLocalAgentProgress(null);
+    setLocalAgentError("");
+    setLocalAgentStatus(isLocalLLMAvailable() ? "ready" : "unavailable");
 
     const requestStartedAt = performance.now();
 
@@ -1064,6 +1121,7 @@ function App() {
 
       void (async () => {
         try {
+          const { createResearchRetriever } = await import("./ai/retrieval/researchRetriever");
           const retriever =
             await createResearchRetriever({
               command: cleanCommand,
@@ -1127,6 +1185,76 @@ function App() {
     } finally {
 
       setAgentLoading(false);
+    }
+  };
+
+  const runLocalSynthesis = async () => {
+    if (agentLoading || localAgentLoading || !agentBrief) return;
+
+    if (!isLocalLLMAvailable()) {
+      setLocalAgentStatus("unavailable");
+      setLocalAgentError("Local synthesis requires WebGPU and Web Workers in this browser.");
+      return;
+    }
+
+    const requestId = ++localAgentRequestId.current;
+    setLocalAgentResult(null);
+    setLocalAgentStatus("loading");
+    setLocalAgentProgress({ progress: 0, text: "Preparing local model…" });
+    setLocalAgentError("");
+
+    try {
+      // Browser retrieval is finished. Release its embedding model before WebLLM
+      // allocates its own GPU buffers, especially on integrated GPUs.
+      setLocalAgentProgress({ progress: 0, text: "Releasing retrieval resources…" });
+      const { releaseEmbedder } = await import("./ai/retrieval/embeddings");
+      await releaseEmbedder();
+
+      localRuntimeLoaded = true;
+      const { generateSourceLockedAgentAnswer } = await import("./ai/local/sourceLockedAgent");
+      const result = await generateSourceLockedAgentAnswer(
+        {
+          query: command.trim(),
+          evidence: agentEvidence,
+          marketSnapshot: snapshot as unknown as Record<string, unknown>,
+          fundamentals: agentFundamentals as unknown as Record<string, unknown> | null,
+          strategyEvidence: strategyEvidence
+            ? (strategyEvidence as unknown as Record<string, unknown>)
+            : null,
+        },
+        {
+          onStage: (stage) => {
+            if (localAgentRequestId.current !== requestId) return;
+            setLocalAgentStatus(stage);
+            if (stage === "generating") setLocalAgentProgress(null);
+          },
+          onProgress: (progress) => {
+            if (localAgentRequestId.current !== requestId) return;
+            setLocalAgentStatus("loading");
+            setLocalAgentProgress(progress);
+          },
+        },
+      );
+
+      if (localAgentRequestId.current === requestId) {
+        setLocalAgentResult(result);
+        setLocalAgentStatus("completed");
+      }
+    } catch (error) {
+      if (localAgentRequestId.current !== requestId) return;
+      resetLocalLLM();
+      const message = error instanceof Error ? error.message : "Local synthesis failed.";
+      const webGpuUnavailable = /webgpu.*(?:not available|unavailable)|(?:no|unavailable).*gpu adapter/i.test(message);
+      setLocalAgentStatus(webGpuUnavailable ? "unavailable" : "failed");
+      setLocalAgentError(
+        /backend answer/i.test(message)
+          ? message
+          : `${message} The deterministic backend answer and Research Evidence remain available above.`,
+      );
+    } finally {
+      if (localAgentRequestId.current === requestId) {
+        setLocalAgentProgress(null);
+      }
     }
   };
 
@@ -2111,12 +2239,12 @@ function App() {
                     value={command}
                     onChange={(event) => setCommand(event.target.value)}
                     placeholder={`Analyze ${symbol} on ${timeframe}...`}
-                    disabled={agentLoading}
+                    disabled={agentLoading || localAgentLoading}
                     aria-label="Agent command"
                   />
                   <button
                     type="submit"
-                    disabled={agentLoading || !command.trim()}
+                    disabled={agentLoading || localAgentLoading || !command.trim()}
                     className="agent-terminal-send"
                     title="Run analysis"
                   >
@@ -2357,6 +2485,87 @@ function App() {
                     runtime={agentRetrievalRuntime}
                     loading={agentRetrievalLoading}
                   />
+
+                  <section className="agent-terminal-section agent-local-synthesis">
+                    <div className="agent-section-heading">
+                      <div>
+                        <span className="agent-terminal-kicker">PHASE 3 · ON-DEVICE</span>
+                        <h3>Local evidence synthesis</h3>
+                      </div>
+                      <div className="agent-local-heading-status">
+                        <span className="agent-source-label">QWEN3 · WEB WORKER</span>
+                        <span className={`agent-local-status is-${localAgentStatus}`} role="status" aria-live="polite">
+                          {getLocalAgentStatusLabel(localAgentStatus)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="agent-local-description">
+                      Synthesize the deterministic snapshot and retrieved evidence with the local model.
+                      The model runs only when you start it here.
+                    </p>
+
+                    {localAgentStatus === "loading" && localAgentProgress && (
+                      <div className="agent-local-progress" role="status" aria-live="polite">
+                        <div className="agent-local-progress-copy">
+                          <strong>{Math.round(localAgentProgress.progress * 100)}%</strong>
+                          <span>{localAgentProgress.text}</span>
+                        </div>
+                        <div className="agent-progress-track">
+                          <span style={{ width: `${Math.max(0, Math.min(100, localAgentProgress.progress * 100))}%` }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {localAgentStatus === "generating" && (
+                      <p className="agent-local-running" role="status" aria-live="polite">
+                        The model is generating a qualitative explanation in the local worker.
+                      </p>
+                    )}
+
+                    {localAgentError && (
+                      <div className="agent-local-error" role="alert">
+                        <AlertTriangle size={14} />
+                        <span>{localAgentError}</span>
+                      </div>
+                    )}
+
+                    {localAgentResult && (
+                      <div className="agent-local-answer">
+                        <div className="agent-local-answer-meta">
+                          <span>{localAgentResult.model}</span>
+                          <span>{localAgentResult.evidenceCount} retrieved items supplied</span>
+                        </div>
+                        <p>{localAgentResult.answer || "The local model returned an empty response."}</p>
+                      </div>
+                    )}
+
+                    {localAgentStatus === "unavailable" && (
+                      <p className="agent-local-unavailable">
+                        Local synthesis requires WebGPU and Web Workers in this browser.
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      className="agent-local-run"
+                      onClick={() => void runLocalSynthesis()}
+                      disabled={
+                        localAgentLoading ||
+                        agentRetrievalLoading ||
+                        !isLocalLLMAvailable()
+                      }
+                    >
+                      {localAgentLoading ? <span className="spinner" /> : <Sparkles size={14} />}
+                      {localAgentLoading
+                        ? localAgentStatus === "loading" ? "Loading local model…" : "Generating locally…"
+                        : localAgentResult
+                          ? "Run local synthesis again"
+                          : agentRetrievalLoading
+                            ? "Preparing retrieved evidence…"
+                            : "Synthesize with local model"}
+                    </button>
+                  </section>
 
                   <section className="agent-terminal-section">
                     <div className="agent-section-heading">

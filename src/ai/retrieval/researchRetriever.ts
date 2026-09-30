@@ -22,7 +22,6 @@ type CacheEntry = {
   runtime: "webgpu" | "wasm";
   fallbackUsed: boolean;
   createdAt: number;
-  lastUsedAt: number;
   queryCache: Map<string, RetrievedEvidence[]>;
 };
 
@@ -77,7 +76,6 @@ function stableFingerprint(atoms: ResearchAtom[]): string {
 }
 
 function touchCache(key: string, entry: CacheEntry): void {
-  entry.lastUsedAt = Date.now();
   indexCache.delete(key);
   indexCache.set(key, entry);
 }
@@ -132,7 +130,6 @@ async function getOrBuildEntry(
       runtime: result.embeddingRuntime,
       fallbackUsed: result.embeddingFallbackUsed,
       createdAt: Date.now(),
-      lastUsedAt: Date.now(),
       queryCache: new Map(),
     };
 
@@ -207,7 +204,6 @@ export async function createResearchRetriever(
 
       entry.queryCache.set(cacheKey, results);
       trimQueryCache(entry);
-      entry.lastUsedAt = Date.now();
 
       return results;
     },

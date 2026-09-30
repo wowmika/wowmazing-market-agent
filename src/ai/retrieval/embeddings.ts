@@ -1,4 +1,4 @@
-import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import type { FeatureExtractionPipeline } from "@huggingface/transformers";
 
 export const EMBEDDING_MODEL = "mixedbread-ai/mxbai-embed-xsmall-v1";
 export const EMBEDDING_DIMENSIONS = 384;
@@ -12,6 +12,9 @@ function hasWebGPU(): boolean {
 }
 
 async function createExtractor(device: EmbeddingRuntime, onProgress?: (progress: number) => void) {
+  // Keep Transformers.js and its ONNX/WASM runtime out of the startup bundle.
+  // This module is first used when browser retrieval is explicitly requested.
+  const { pipeline } = await import("@huggingface/transformers");
   return pipeline("feature-extraction", EMBEDDING_MODEL, {
     device,
     dtype: device === "webgpu" ? "fp16" : "q8",
@@ -60,4 +63,20 @@ export async function embedTexts(texts: string[], onProgress?: (progress: number
 export async function embedText(text: string): Promise<number[]> {
   const result = await embedTexts([text]);
   return result.embeddings[0] ?? [];
+}
+
+/** Release the retrieval model's GPU/CPU resources before another local model starts. */
+export async function releaseEmbedder(): Promise<void> {
+  const pendingExtractor = extractorPromise;
+  extractorPromise = null;
+  runtime = null;
+
+  if (!pendingExtractor) return;
+
+  try {
+    const extractor = await pendingExtractor;
+    await extractor.dispose();
+  } catch {
+    // Retrieval is already complete; disposal failure should not block the backend/local fallback.
+  }
 }
