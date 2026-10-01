@@ -7,6 +7,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import numpy as np
 import pandas as pd
@@ -60,6 +61,59 @@ ALLOW_YFINANCE_FALLBACK = (
     }
 )
 
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "tauri://localhost",
+    "http://tauri.localhost",
+)
+
+
+def configured_cors_origins() -> list[str]:
+    """Return explicit browser origins, using local-only defaults if unset."""
+
+    configured = os.getenv("CORS_ORIGINS")
+    if configured is None:
+        return list(DEFAULT_CORS_ORIGINS)
+
+    origins: list[str] = []
+    for value in configured.split(","):
+        origin = value.strip().rstrip("/")
+        if not origin:
+            continue
+
+        parsed = urlsplit(origin)
+        try:
+            valid_port = parsed.port is None or 0 < parsed.port <= 65535
+        except ValueError:
+            valid_port = False
+
+        if (
+            origin == "*"
+            or parsed.scheme.lower() not in {"http", "https", "tauri"}
+            or not parsed.hostname
+            or "*" in parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or not valid_port
+        ):
+            raise ValueError(
+                "CORS_ORIGINS must contain comma-separated origins only "
+                "(for example https://market.example.com); wildcard origins "
+                "and URL paths are not allowed."
+            )
+
+        if origin not in origins:
+            origins.append(origin)
+
+    return origins
+
+
+CORS_ORIGINS = configured_cors_origins()
+
 
 # ============================================================
 # FASTAPI
@@ -77,7 +131,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

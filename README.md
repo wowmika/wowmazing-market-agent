@@ -1,47 +1,59 @@
 # WOWMAZING Market Agent
 
-WOWMAZING is a market research terminal with a deterministic FastAPI backend, a React/Vite interface, browser-side evidence retrieval, and optional on-device narrative synthesis.
+WOWMAZING is a market research terminal with a deterministic FastAPI backend, a React/Vite frontend, browser-side evidence retrieval, and optional local narrative synthesis.
 
 ## Architecture
 
 ```mermaid
 flowchart TD
-  UI[React / Vite UI] --> API[FastAPI backend]
+  UI[React / Vite terminal] --> API[FastAPI]
   API --> UP[Upstox market data]
-  API --> YF[yfinance fundamentals and fallback data]
-  API --> ENGINE[Deterministic technical and strategy engines]
-  API -->|optional server-side explanation| OAI[OpenAI API]
-  UI --> ORAMA[Orama browser evidence index]
-  ORAMA --> EMB[Transformers.js embeddings]
-  UI -->|explicit user action| WORKER[WebLLM Web Worker]
+  API --> YF[yfinance fundamentals and fallback]
+  API --> DET[Deterministic technical and strategy engine]
+  API -. optional server-side explanation .-> OAI[OpenAI API]
+  UI --> ORAMA[Orama evidence retrieval]
+  ORAMA --> EMB[Transformers.js embeddings on demand]
+  UI -->|explicit local synthesis action| WORKER[WebLLM Web Worker]
   WORKER --> QWEN[Qwen3-0.6B-q4f16_1-MLC]
+  WORKER --> GUARD[Local answer guard]
 ```
 
-- **Deterministic backend:** FastAPI serves market data, fundamentals, technical calculations, strategy evidence, and the structured `/agent` response. Numeric market and risk values come from backend calculations and remain authoritative. Without an OpenAI key, or if its explanation call fails, `/agent` returns the deterministic response.
-- **Market and company data:** Upstox is the primary provider for Indian equities and indices. yfinance supplies fundamentals and is also used for global data and the configured market-data fallback.
-- **Technical and strategy analysis:** Indicators and strategy evidence are calculated by the backend. Strategy history is descriptive evidence, not a forecast.
-- **Browser retrieval:** Orama ranks the market, fundamental, technical, strategy, and other evidence supplied to the UI. Transformers.js creates embeddings on demand; it tries WebGPU and falls back to WASM if that path fails. This retrieval layer searches supplied evidence; it is not a general web search service.
-- **Optional local synthesis:** Ask WOWMAZING can explicitly send its compact, source-tagged evidence packet to Qwen3 through `src/ai/local/webllm.worker.ts`. WebLLM is dynamically imported inside that worker, only after the user starts synthesis. Output is sanitized and checked; the local model narrates evidence and does not own numeric facts or risk decisions.
-- **Cloud use:** Local WebLLM inference does not require a per-query cloud LLM API call. The first local run does require downloading model assets; successful downloads are cached in browser storage. Separately, the backend can use OpenAI for its optional server-side explanation when `OPENAI_API_KEY` is configured.
+- **FastAPI is authoritative** for market snapshots, technical indicators, fundamentals, strategy evidence, risk, and invalidation values. Upstox supplies primary Indian market data; yfinance supplies fundamentals, global data, and the configured fallback. The deterministic strategy engine analyzes historical candles and does not forecast future prices.
+- **Browser retrieval** indexes evidence provided by the application with Orama. Transformers.js generates embeddings only when retrieval is requested, trying WebGPU and falling back to WASM where available. Retrieval ranks supplied evidence; it is not a general web search service.
+- **Local AI is optional and explicit.** Ask WOWMAZING loads the WebLLM runtime only after the user selects local synthesis. Inference runs in a dedicated Web Worker; the worker loads one Qwen3 model instance and keeps model computation off React's main thread. The local answer guard strips hidden reasoning and rejects uncited, numeric, or unsupported claims. The deterministic backend and risk panel remain authoritative.
+- **No per-query cloud LLM is required for local inference.** The first local run downloads model assets and browser storage caches them for later use. Independently, the backend can call OpenAI for its optional server-side explanation when configured; this is not used by the local worker.
+
+## Environment variables
+
+`.env.example` documents all application settings. It contains placeholders only. Backend secrets must stay server-side and must never use a `VITE_` prefix.
+
+| Variable | Read by | Purpose |
+| --- | --- | --- |
+| `VITE_API_BASE_URL` | Vite build | Public FastAPI base URL embedded in the frontend. Defaults locally to `http://127.0.0.1:8000`; set it to the deployed API URL in Vercel. It must not contain credentials. |
+| `MARKET_DATA_PROVIDER` | FastAPI | `upstox` (default) or `yfinance`. |
+| `ALLOW_YFINANCE_FALLBACK` | FastAPI | Whether yfinance may provide market data when Upstox fails; defaults to `true`. |
+| `UPSTOX_ANALYTICS_TOKEN` | FastAPI | Server-side Upstox access token. Required for Upstox market data. |
+| `OPENAI_API_KEY` | FastAPI | Optional server-side key for the backend explanation. Not used by local WebLLM. |
+| `OPENAI_MODEL` | FastAPI | Model for the optional backend explanation; defaults to `gpt-5.6-luna`. |
+| `CORS_ORIGINS` | FastAPI | Comma-separated allowed browser origins. If unset, the API allows only local Vite/Tauri origins. Configure the deployed frontend origin in production. Empty entries are ignored; wildcard origins and URL paths are rejected. |
+
+Render supplies `PORT` to the backend process. Do not put API keys or provider tokens in Vercel's `VITE_*` variables or browser code.
 
 ## Local development
 
-Use Node.js/npm and Python 3.11. From the repository root in PowerShell:
+From the repository root in PowerShell:
 
 ```powershell
 npm ci
 py -3.11 -m venv backend\.venv
 .\backend\.venv\Scripts\Activate.ps1
 python -m pip install -r backend\requirements.txt
+Copy-Item .env.example backend\.env
 ```
 
-Create `backend/.env` for backend settings. Set `UPSTOX_ANALYTICS_TOKEN` for Upstox data; keep this file local and never commit it. The repository-root `.env.example` documents the frontend API URL. To override the default local API address, create `.env.local` in the repository root with:
+Edit `backend/.env` and replace the credential placeholders locally. The file is ignored by Git. `VITE_API_BASE_URL` is not needed for the local default. If you need to override it, set it in a root `.env.local` file; Vite only exposes that URL to the client.
 
-```text
-VITE_API_BASE_URL=http://127.0.0.1:8000
-```
-
-Start the backend from the repository root:
+Start FastAPI from the repository root:
 
 ```powershell
 python -m uvicorn backend.server:app --reload --host 127.0.0.1 --port 8000
@@ -53,35 +65,20 @@ In a second terminal, start the frontend:
 npm run dev
 ```
 
-Vite serves the UI at `http://localhost:1420`; the backend health endpoint is `http://127.0.0.1:8000/health`. The frontend defaults to that local API address when `VITE_API_BASE_URL` is unset.
-
-## Environment variables
-
-| Variable | Used by | Purpose |
-| --- | --- | --- |
-| `UPSTOX_ANALYTICS_TOKEN` | FastAPI | Upstox access token for Indian market data. Keep it server-side. |
-| `MARKET_DATA_PROVIDER` | FastAPI | Selects `upstox` (default) or `yfinance` as the market-data provider. |
-| `ALLOW_YFINANCE_FALLBACK` | FastAPI | Allows yfinance market data when Upstox is unavailable; defaults to `true`. |
-| `OPENAI_API_KEY` | FastAPI | Optional key for the backend’s server-side explanation. Not needed for local WebLLM inference. |
-| `OPENAI_MODEL` | FastAPI | Optional model selection for that explanation; defaults to `gpt-5.6-luna`. |
-| `VITE_API_BASE_URL` | Vite build | FastAPI base URL compiled into the frontend; defaults to `http://127.0.0.1:8000`. |
-| `PORT` | Hosting platform | Render supplies the API listening port in deployment. |
-
-For local backend settings, place these names in `backend/.env`; omit optional variables when not needed. For deployment, configure secrets in the hosting provider’s environment settings rather than in source control or frontend variables.
+Vite serves the app at `http://localhost:1420`; the backend health endpoint is `http://127.0.0.1:8000/health`. Local development CORS defaults also allow `127.0.0.1:1420` and the local Tauri origins.
 
 ## Production deployment
 
-- **Frontend:** `npm run build` creates the static site in `dist/`. Deploy it to Vercel or another static host. `vercel.json` rewrites routes to `index.html` for the single-page app. Set `VITE_API_BASE_URL` to the deployed FastAPI URL before building.
-- **Backend:** `render.yaml` describes a separate Render Python web service running `uvicorn backend.server:app`. Configure the Upstox token and any optional server-side OpenAI settings in Render. The API health check is `/health`.
-- **Browser model assets:** The built Web Worker is served with the frontend assets. On explicit local synthesis, the browser fetches the WebLLM model/runtime assets and caches model data locally; later runs can reuse that cache.
-- **Desktop:** The same frontend can also be run in the Tauri wrapper. The API still needs to be reachable at the configured `VITE_API_BASE_URL`.
+- **Frontend — Vercel:** deploy the Vite project as a static site using `npm run build` and the `dist/` output. `vercel.json` rewrites client-side routes to `index.html`. Set `VITE_API_BASE_URL` to the public FastAPI URL in the Vercel build environment; Vite embeds it at build time. Do not set provider credentials there.
+- **Backend — Render:** `render.yaml` defines the Python web service, installs `backend/requirements.txt`, starts `backend.server:app`, and checks `/health`. Add `UPSTOX_ANALYTICS_TOKEN` and `CORS_ORIGINS` in Render's environment settings; add `OPENAI_API_KEY` only if the optional backend explanation is wanted. Set `CORS_ORIGINS` to the exact frontend origin, for example `https://market.example.com` (scheme and host, no path). Comma-separated additional origins are supported.
+- The backend must be reachable from the browser over HTTPS in production. The frontend API URL and backend CORS allowlist must point to the corresponding deployments.
+- The Tauri desktop wrapper uses the same frontend configuration and still requires a reachable FastAPI service.
 
-## Privacy, resources, and limitations
+## Limitations and resource use
 
-- The evidence packet is assembled in the browser and passed to a Web Worker; WebLLM model loading, tokenization, and generation run there. The worker keeps inference off React’s main JavaScript thread, but it does **not** isolate GPU or system-memory use; WebGPU allocation can still make a constrained browser unstable.
-- Local synthesis requires browser support for WebGPU and Web Workers. The model is large, needs an initial download, and relies on browser storage for caching. A previous QA run on an 8 GB Intel integrated-graphics laptop crashed the browser tab during model initialization. Resource handoff and lower context/output limits have since been added, but that device has not yet been re-tested with the model. Use the deterministic backend response if local synthesis is unavailable or fails.
-- The UI sends analysis requests to the configured FastAPI service. If the optional server-side OpenAI explanation is enabled, that service also sends the supplied request/evidence to OpenAI. Local synthesis itself does not require that service.
-- Upstox access, market hours, provider limits, and supported instruments affect data availability. yfinance may be delayed, incomplete, or unavailable; fundamentals can be missing or stale.
-- Browser retrieval ranks only evidence already supplied to it and cannot independently verify provider data. Historical strategy results do not predict future performance.
-- The current FastAPI CORS middleware allows all origins. Although `render.yaml` declares `CORS_ORIGINS`, the server does not currently read it; restrict CORS origins before exposing the API publicly.
-- The production build still emits a Transformers.js chunk above Vite’s 500 kB warning threshold. Heavy model runtimes remain code-split and lazy-loaded, but the warning is unresolved.
+- WebGPU and Web Workers are required for local WebLLM synthesis. The model is large and can use substantial GPU and system memory. Worker isolation keeps inference off the UI thread but cannot isolate device memory or prevent browser/driver instability on constrained hardware. If local synthesis is unavailable or fails, use the deterministic response.
+- A previous QA run on an 8 GB Intel integrated-graphics laptop crashed the browser tab during model initialization. Resource limits were subsequently reduced, but that device has not been re-tested with WebLLM after those mitigations. Do not treat local inference as available until it has been validated on target devices.
+- Model assets require an initial download and browser storage for caching. Browser storage can be cleared or evicted by the browser.
+- Browser retrieval only ranks evidence already supplied to it and cannot independently verify provider data. Upstox access, market hours, provider limits, yfinance delays, and missing or stale fundamentals affect data availability.
+- If `OPENAI_API_KEY` is configured, the backend sends its analysis request and evidence to OpenAI for the optional explanation. Local inference itself has no per-query cloud LLM dependency.
+- Vite may report large-chunk advisories for ML-related assets. Transformers.js retrieval and WebLLM are dynamically loaded; the WebLLM worker is emitted separately, and neither model initializes when the terminal first opens.
