@@ -1,7 +1,23 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
+
   "name": "wowmazing-research-gateway",
+
   "main": "src/index.ts",
+
   "compatibility_date": "2026-10-01",
-  "workers_dev": true
+
+  "workers_dev": false,
+
+  "vars": {
+    "RESEARCH_UPSTREAM_ENABLED": "true",
+    "CORS_ORIGINS": "https://market.wowmazingstudios.com"
+  },
+
+  "routes": [
+    {
+      "pattern": "research.market.wowmazingstudios.com",
+      "custom_domain": true
+    }
+  ]
 }
