@@ -43,9 +43,59 @@ describe("research gateway HTTP boundary", () => {
     expect(body).toMatchObject({
       status: "ok",
       service: "WOWMAZING Research Gateway",
-      version: "0.3.0",
+      version: "0.4.0",
       upstream_enabled: false,
     });
+  });
+
+  it("allows configured browser origins", async () => {
+    const response = await worker.fetch(
+      new Request(
+        "http://localhost:8787/health",
+        {
+          headers: {
+            Origin:
+              "https://market.wowmazingstudios.com",
+          },
+        },
+      ),
+      {
+        RESEARCH_UPSTREAM_ENABLED: "false",
+        CORS_ORIGINS:
+          "https://market.wowmazingstudios.com",
+      },
+    );
+
+    expect(response.status).toBe(200);
+
+    expect(
+      response.headers.get(
+        "Access-Control-Allow-Origin",
+      ),
+    ).toBe(
+      "https://market.wowmazingstudios.com",
+    );
+  });
+
+  it("rejects unconfigured browser origins", async () => {
+    const response = await worker.fetch(
+      new Request(
+        "http://localhost:8787/health",
+        {
+          headers: {
+            Origin:
+              "https://evil.example.com",
+          },
+        },
+      ),
+      {
+        RESEARCH_UPSTREAM_ENABLED: "false",
+        CORS_ORIGINS:
+          "https://market.wowmazingstudios.com",
+      },
+    );
+
+    expect(response.status).toBe(403);
   });
 
   it("rejects unsupported sources", async () => {
@@ -195,9 +245,7 @@ describe("research gateway HTTP boundary", () => {
       category: "Allotment of Securities",
     });
 
-    expect(
-      body.items[0].text,
-    ).toContain(
+    expect(body.items[0].text).toContain(
       "Allotment of 13,00,000 non-convertible debentures.",
     );
 
@@ -417,7 +465,8 @@ describe("SEBI upstream protection", () => {
         new Response(rss, {
           status: 200,
           headers: {
-            "content-type": "application/rss+xml",
+            "content-type":
+              "application/rss+xml",
           },
         }),
       ),
@@ -434,7 +483,8 @@ describe("SEBI upstream protection", () => {
     expect(items[0]).toMatchObject({
       source: "SEBI",
       title: "Reliance regulatory update",
-      url: "https://www.sebi.gov.in/example",
+      url:
+        "https://www.sebi.gov.in/example",
       category: "regulatory",
       symbol: null,
     });

@@ -9,16 +9,80 @@ const MAX_SYMBOL_LENGTH = 32;
 const MAX_QUERY_LENGTH = 160;
 const MAX_LIMIT = 20;
 
-function json(data: unknown, status = 200): Response {
-  return Response.json(data, {
-    status,
-    headers: {
-      "Cache-Control": "no-store",
-    },
-  });
+function getAllowedOrigins(
+  env: Env,
+): string[] {
+  return (env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 }
 
-function isValidSymbol(symbol: string): boolean {
+function getCorsOrigin(
+  request: Request,
+  env: Env,
+): string | null {
+  const requestOrigin =
+    request.headers.get("Origin");
+
+  if (!requestOrigin) {
+    return null;
+  }
+
+  const allowedOrigins =
+    getAllowedOrigins(env);
+
+  if (allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return null;
+}
+
+function json(
+  data: unknown,
+  status = 200,
+  corsOrigin?: string | null,
+): Response {
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Content-Type": "application/json",
+  });
+
+  if (corsOrigin) {
+    headers.set(
+      "Access-Control-Allow-Origin",
+      corsOrigin,
+    );
+
+    headers.set(
+      "Access-Control-Allow-Methods",
+      "GET, OPTIONS",
+    );
+
+    headers.set(
+      "Access-Control-Allow-Headers",
+      "Content-Type",
+    );
+
+    headers.set(
+      "Vary",
+      "Origin",
+    );
+  }
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers,
+    },
+  );
+}
+
+function isValidSymbol(
+  symbol: string,
+): boolean {
   return (
     symbol.length > 0 &&
     symbol.length <= MAX_SYMBOL_LENGTH &&
@@ -26,11 +90,15 @@ function isValidSymbol(symbol: string): boolean {
   );
 }
 
-function isValidQuery(query: string): boolean {
+function isValidQuery(
+  query: string,
+): boolean {
   return query.length <= MAX_QUERY_LENGTH;
 }
 
-function parseLimit(value: string | null): number {
+function parseLimit(
+  value: string | null,
+): number {
   if (!value) {
     return 10;
   }
@@ -41,11 +109,15 @@ function parseLimit(value: string | null): number {
     return 0;
   }
 
-  return Math.min(Math.max(parsed, 1), MAX_LIMIT);
+  return Math.min(
+    Math.max(parsed, 1),
+    MAX_LIMIT,
+  );
 }
 
 export interface Env {
   RESEARCH_UPSTREAM_ENABLED?: string;
+  CORS_ORIGINS?: string;
 }
 
 export default {
@@ -55,22 +127,72 @@ export default {
   ): Promise<Response> {
     const url = new URL(request.url);
 
+    const corsOrigin =
+      getCorsOrigin(request, env);
+
+    if (request.method === "OPTIONS") {
+      if (!corsOrigin) {
+        return json(
+          {
+            error:
+              "CORS origin not allowed",
+          },
+          403,
+        );
+      }
+
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin":
+            corsOrigin,
+          "Access-Control-Allow-Methods":
+            "GET, OPTIONS",
+          "Access-Control-Allow-Headers":
+            "Content-Type",
+          "Access-Control-Max-Age":
+            "86400",
+          Vary: "Origin",
+        },
+      });
+    }
+
     if (request.method !== "GET") {
       return json(
         {
           error: "Method not allowed",
         },
         405,
+        corsOrigin,
+      );
+    }
+
+    if (
+      request.headers.has("Origin") &&
+      !corsOrigin
+    ) {
+      return json(
+        {
+          error: "CORS origin not allowed",
+        },
+        403,
       );
     }
 
     if (url.pathname === "/health") {
-      return json({
-        status: "ok",
-        service: "WOWMAZING Research Gateway",
-        version: "0.3.0",
-        upstream_enabled: env.RESEARCH_UPSTREAM_ENABLED === "true",
-      });
+      return json(
+        {
+          status: "ok",
+          service:
+            "WOWMAZING Research Gateway",
+          version: "0.4.0",
+          upstream_enabled:
+            env.RESEARCH_UPSTREAM_ENABLED ===
+            "true",
+        },
+        200,
+        corsOrigin,
+      );
     }
 
     if (url.pathname !== "/v1/research") {
@@ -79,6 +201,7 @@ export default {
           error: "Not found",
         },
         404,
+        corsOrigin,
       );
     }
 
@@ -96,38 +219,54 @@ export default {
       .get("query")
       ?.trim();
 
-    const limitValue = url.searchParams.get("limit");
+    const limitValue =
+      url.searchParams.get("limit");
 
-    if (!source || !isSourceKey(source)) {
+    if (
+      !source ||
+      !isSourceKey(source)
+    ) {
       return json(
         {
           error: "Invalid source",
-          allowed_sources: Object.keys(SOURCE_CONFIG),
+          allowed_sources:
+            Object.keys(SOURCE_CONFIG),
         },
         400,
+        corsOrigin,
       );
     }
 
-    if (!symbol || !isValidSymbol(symbol)) {
+    if (
+      !symbol ||
+      !isValidSymbol(symbol)
+    ) {
       return json(
         {
           error: "Invalid symbol",
         },
         400,
+        corsOrigin,
       );
     }
 
-    if (query && !isValidQuery(query)) {
+    if (
+      query &&
+      !isValidQuery(query)
+    ) {
       return json(
         {
           error: "Query is too long",
-          max_query_length: MAX_QUERY_LENGTH,
+          max_query_length:
+            MAX_QUERY_LENGTH,
         },
         400,
+        corsOrigin,
       );
     }
 
-    const limit = parseLimit(limitValue);
+    const limit =
+      parseLimit(limitValue);
 
     if (limit === 0) {
       return json(
@@ -136,50 +275,72 @@ export default {
           max_limit: MAX_LIMIT,
         },
         400,
+        corsOrigin,
       );
     }
 
-    if (env.RESEARCH_UPSTREAM_ENABLED !== "true") {
+    if (
+      env.RESEARCH_UPSTREAM_ENABLED !==
+      "true"
+    ) {
       return json(
         {
-          error: "Research upstream is disabled",
+          error:
+            "Research upstream is disabled",
         },
         503,
+        corsOrigin,
       );
     }
 
     try {
-      const items = await fetchResearch(source, {
-        symbol,
-        query: query || null,
-        limit,
-      });
+      const items =
+        await fetchResearch(
+          source,
+          {
+            symbol,
+            query: query || null,
+            limit,
+          },
+        );
 
-      return json({
-        status: "ok",
-        source,
-        source_name: SOURCE_CONFIG[source].name,
-        symbol,
-        count: items.length,
-        items,
-      });
+      return json(
+        {
+          status: "ok",
+          source,
+          source_name:
+            SOURCE_CONFIG[source].name,
+          symbol,
+          count: items.length,
+          items,
+        },
+        200,
+        corsOrigin,
+      );
     } catch (error) {
-      if (error instanceof ResearchGatewayError) {
+      if (
+        error instanceof
+        ResearchGatewayError
+      ) {
         return json(
           {
             error: error.code,
             message: error.message,
           },
           error.status,
+          corsOrigin,
         );
       }
 
       return json(
         {
-          error: "RESEARCH_GATEWAY_ERROR",
-          message: "Unexpected research gateway failure.",
+          error:
+            "RESEARCH_GATEWAY_ERROR",
+          message:
+            "Unexpected research gateway failure.",
         },
         500,
+        corsOrigin,
       );
     }
   },
