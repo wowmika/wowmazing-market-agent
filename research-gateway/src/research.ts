@@ -25,6 +25,7 @@ export const SOURCE_CONFIG = {
 
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const UPSTREAM_TIMEOUT_MS = 5_000;
+const RESEARCH_BACKEND_TIMEOUT_MS = 65_000;
 const MAX_ITEMS = 20;
 
 export class ResearchGatewayError extends Error {
@@ -139,7 +140,7 @@ async function fetchWithGuards(
 
   const timer = setTimeout(
     () => controller.abort(),
-    UPSTREAM_TIMEOUT_MS,
+     RESEARCH_BACKEND_TIMEOUT_MS,
   );
 
   try {
@@ -210,144 +211,122 @@ async function fetchWithGuards(
 }
 
 /* -------------------------------------------------------------------------- */
-/* NSE HELPERS                                                                */
+/* NSE BACKEND CONFIGURATION                                                  */
 /* -------------------------------------------------------------------------- */
 
-/**
- * NSE expects dates in DD-MM-YYYY format.
- *
- * We deliberately use Asia/Kolkata rather than the Worker runtime timezone.
- */
-function getNseDateString(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).formatToParts(date);
-
-  const day =
-    parts.find((part) => part.type === "day")?.value ?? "";
-
-  const month =
-    parts.find((part) => part.type === "month")?.value ?? "";
-
-  const year =
-    parts.find((part) => part.type === "year")?.value ?? "";
-
-  return `${day}-${month}-${year}`;
-}
-
-function getNseDateRange(): {
-  fromDate: string;
-  toDate: string;
-} {
-  const now = new Date();
-
-  const previousDay = new Date(
-    now.getTime() - 24 * 60 * 60 * 1000,
-  );
-
-  return {
-    fromDate: getNseDateString(previousDay),
-    toDate: getNseDateString(now),
-  };
-}
-
-/* -------------------------------------------------------------------------- */
-/* NSE CORPORATE ANNOUNCEMENT TYPES                                           */
-/* -------------------------------------------------------------------------- */
-
-type NseAnnouncement = {
-  an_dt?: string;
-  attchmntFile?: string;
-  attchmntText?: string;
-  desc?: string;
-  seq_id?: string;
-  sm_isin?: string;
-  sm_name?: string;
-  sort_date?: string;
-  symbol?: string;
+export type ResearchBackendEnv = {
+  RESEARCH_BACKEND_URL?: string;
+  RESEARCH_GATEWAY_KEY?: string;
 };
 
 /* -------------------------------------------------------------------------- */
 /* NSE RESPONSE NORMALIZATION                                                 */
 /* -------------------------------------------------------------------------- */
 
-function parseNseAnnouncements(
+function normalizeBackendNseItems(
   payload: unknown,
-  fallbackSymbol: string | null,
+  fallbackSymbol: string,
 ): ResearchItem[] {
-  if (!Array.isArray(payload)) {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    !Array.isArray(
+      (payload as { items?: unknown }).items,
+    )
+  ) {
     throw new ResearchGatewayError(
       "NSE_INVALID_RESPONSE",
-      "NSE returned an unexpected response format.",
+      "Research backend returned an unexpected NSE response.",
       502,
     );
   }
 
-  return payload
+  const items =
+    (payload as { items: unknown[] }).items;
+
+  return items
     .slice(0, MAX_ITEMS)
-    .map((item, index) => {
-      const announcement = item as NseAnnouncement;
+    .map((raw, index) => {
+      if (!raw || typeof raw !== "object") {
+        return null;
+      }
+
+      const item = raw as Record<string, unknown>;
 
       const title =
-        announcement.desc?.trim() ||
-        "NSE corporate announcement";
-
-      const publishedAt =
-        announcement.sort_date?.trim() ||
-        announcement.an_dt?.trim() ||
-        null;
-
-      const symbol =
-        announcement.symbol?.trim() ||
-        fallbackSymbol;
-
-      const company =
-        announcement.sm_name?.trim() ||
-        null;
-
-      const text =
-        announcement.attchmntText?.trim() ||
-        title;
+        typeof item.title === "string" &&
+        item.title.trim()
+          ? item.title.trim()
+          : "NSE corporate announcement";
 
       const url =
-        announcement.attchmntFile?.trim() ||
-        "https://www.nseindia.com/companies-listing/corporate-filings-announcements";
+        typeof item.url === "string"
+          ? item.url.trim()
+          : "";
 
-      const id =
-        announcement.seq_id?.trim()
-          ? `nse-${announcement.seq_id.trim()}`
-          : `nse-${index + 1}-${btoa(
-              `${title}|${publishedAt ?? ""}|${symbol ?? ""}`,
-            )
-              .replace(/[^a-zA-Z0-9]/g, "")
-              .slice(0, 24)}`;
+      const text =
+        typeof item.text === "string" &&
+        item.text.trim()
+          ? item.text.trim()
+          : title;
+
+      if (!url) {
+        return null;
+      }
 
       return {
-        id,
+        id:
+          typeof item.id === "string" &&
+          item.id.trim()
+            ? item.id.trim()
+            : `nse-backend-${index + 1}`,
+
         title,
+
         source: "NSE",
+
         url,
-        published_at: publishedAt,
+
+        published_at:
+          typeof item.published_at === "string"
+            ? item.published_at
+            : null,
+
         text,
-        symbol,
-        company,
-        category: title,
+
+        symbol:
+          typeof item.symbol === "string" &&
+          item.symbol.trim()
+            ? item.symbol.trim()
+            : fallbackSymbol,
+
+        company:
+          typeof item.company === "string"
+            ? item.company
+            : null,
+
+        category:
+          typeof item.category === "string" &&
+          item.category.trim()
+            ? item.category.trim()
+            : title,
       };
     })
-    .filter((item) => item.url);
+    .filter(
+      (item): item is ResearchItem =>
+        item !== null,
+    );
 }
 
 /* -------------------------------------------------------------------------- */
-/* NSE CORPORATE ANNOUNCEMENT FETCH                                           */
+/* NSE RESEARCH VIA AUTHENTICATED FASTAPI BACKEND                             */
 /* -------------------------------------------------------------------------- */
 
 async function fetchNseResearch(
   symbol: string | null,
   query: string | null,
   limit: number,
+  env: ResearchBackendEnv,
 ): Promise<ResearchItem[]> {
   if (!symbol) {
     throw new ResearchGatewayError(
@@ -357,19 +336,54 @@ async function fetchNseResearch(
     );
   }
 
-  const { fromDate, toDate } = getNseDateRange();
+  const backendUrl =
+    env.RESEARCH_BACKEND_URL?.trim();
 
-  const params = new URLSearchParams({
-    index: "equities",
-    from_date: fromDate,
-    to_date: toDate,
+  const gatewayKey =
+    env.RESEARCH_GATEWAY_KEY?.trim();
+
+  if (!backendUrl || !gatewayKey) {
+    throw new ResearchGatewayError(
+      "RESEARCH_BACKEND_NOT_CONFIGURED",
+      "Research backend configuration is missing.",
+      500,
+    );
+  }
+
+  let url: URL;
+
+  try {
+    url = new URL(
+      "/research/nse",
+      backendUrl,
+    );
+  } catch {
+    throw new ResearchGatewayError(
+      "RESEARCH_BACKEND_CONFIG_INVALID",
+      "Research backend URL is invalid.",
+      500,
+    );
+  }
+
+  url.searchParams.set(
+    "symbol",
     symbol,
-  });
+  );
 
-  const url =
-    `https://www.nseindia.com/api/corporate-announcements?${params.toString()}`;
+  url.searchParams.set(
+    "limit",
+    String(Math.min(limit, MAX_ITEMS)),
+  );
 
-  const controller = new AbortController();
+  if (query?.trim()) {
+    url.searchParams.set(
+      "query",
+      query.trim(),
+    );
+  }
+
+  const controller =
+    new AbortController();
 
   const timer = setTimeout(
     () => controller.abort(),
@@ -377,28 +391,31 @@ async function fetchNseResearch(
   );
 
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "User-Agent":
-          "Mozilla/5.0 (compatible; WowmazingResearchGateway/1.0)",
-        Referer:
-          "https://www.nseindia.com/companies-listing/corporate-filings-announcements",
+    const response = await fetch(
+      url.toString(),
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "X-Research-Gateway-Key":
+            gatewayKey,
+        },
+        signal: controller.signal,
       },
-      signal: controller.signal,
-    });
+    );
 
     if (!response.ok) {
       throw new ResearchGatewayError(
         "UPSTREAM_HTTP_ERROR",
-        `NSE returned HTTP ${response.status}.`,
+        `Research backend returned HTTP ${response.status}.`,
         502,
       );
     }
 
     const contentLength = Number(
-      response.headers.get("content-length") ?? "0",
+      response.headers.get(
+        "content-length",
+      ) ?? "0",
     );
 
     if (
@@ -407,62 +424,48 @@ async function fetchNseResearch(
     ) {
       throw new ResearchGatewayError(
         "UPSTREAM_TOO_LARGE",
-        "NSE response exceeded the size limit.",
+        "Research backend response exceeded the size limit.",
         502,
       );
     }
 
-    const bytes = await response.arrayBuffer();
+    const bytes =
+      await response.arrayBuffer();
 
-    if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+    if (
+      bytes.byteLength >
+      MAX_RESPONSE_BYTES
+    ) {
       throw new ResearchGatewayError(
         "UPSTREAM_TOO_LARGE",
-        "NSE response exceeded the size limit.",
+        "Research backend response exceeded the size limit.",
         502,
       );
     }
-
-    const text = new TextDecoder().decode(bytes);
 
     let payload: unknown;
 
     try {
-      payload = JSON.parse(text);
+      payload = JSON.parse(
+        new TextDecoder().decode(bytes),
+      );
     } catch {
       throw new ResearchGatewayError(
         "NSE_INVALID_JSON",
-        "NSE returned invalid JSON.",
+        "Research backend returned invalid JSON.",
         502,
       );
     }
 
-    let items = parseNseAnnouncements(
+    return normalizeBackendNseItems(
       payload,
       symbol,
     );
-
-    const normalizedQuery =
-      query?.trim().toLowerCase() ?? "";
-
-    if (normalizedQuery) {
-      items = items.filter((item) => {
-        const haystack = [
-          item.title,
-          item.text,
-          item.category,
-          item.company ?? "",
-          item.symbol ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        return haystack.includes(normalizedQuery);
-      });
-    }
-
-    return items.slice(0, Math.min(limit, MAX_ITEMS));
   } catch (error) {
-    if (error instanceof ResearchGatewayError) {
+    if (
+      error instanceof
+      ResearchGatewayError
+    ) {
       throw error;
     }
 
@@ -472,14 +475,14 @@ async function fetchNseResearch(
     ) {
       throw new ResearchGatewayError(
         "UPSTREAM_TIMEOUT",
-        "NSE request timed out.",
+        "Research backend request timed out.",
         504,
       );
     }
 
     throw new ResearchGatewayError(
       "UPSTREAM_FETCH_FAILED",
-      "Unable to fetch NSE corporate announcements.",
+      "Unable to reach the research backend.",
       502,
     );
   } finally {
@@ -498,9 +501,10 @@ export async function fetchResearch(
     query?: string | null;
     limit: number;
   },
+  env: ResearchBackendEnv = {},
 ): Promise<ResearchItem[]> {
   /* ------------------------------------------------------------------------ */
-  /* NSE                                                                     */
+  /* NSE                                                                       */
   /* ------------------------------------------------------------------------ */
 
   if (source === "nse") {
@@ -508,11 +512,12 @@ export async function fetchResearch(
       options.symbol ?? null,
       options.query ?? null,
       options.limit,
+      env,
     );
   }
 
   /* ------------------------------------------------------------------------ */
-  /* SEBI                                                                    */
+  /* SEBI                                                                      */
   /* ------------------------------------------------------------------------ */
 
   const xml = await fetchWithGuards(
@@ -542,5 +547,8 @@ export async function fetchResearch(
     });
   }
 
-  return items.slice(0, Math.min(options.limit, MAX_ITEMS));
+  return items.slice(
+    0,
+    Math.min(options.limit, MAX_ITEMS),
+  );
 }

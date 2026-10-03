@@ -3,6 +3,7 @@ import {
   isSourceKey,
   ResearchGatewayError,
   SOURCE_CONFIG,
+  type ResearchBackendEnv,
 } from "./research";
 
 const MAX_SYMBOL_LENGTH = 32;
@@ -115,7 +116,8 @@ function parseLimit(
   );
 }
 
-export interface Env {
+export interface Env
+  extends ResearchBackendEnv {
   RESEARCH_UPSTREAM_ENABLED?: string;
   CORS_ORIGINS?: string;
 }
@@ -129,6 +131,10 @@ export default {
 
     const corsOrigin =
       getCorsOrigin(request, env);
+
+    /* ---------------------------------------------------------------------- */
+    /* OPTIONS / CORS                                                         */
+    /* ---------------------------------------------------------------------- */
 
     if (request.method === "OPTIONS") {
       if (!corsOrigin) {
@@ -157,6 +163,10 @@ export default {
       });
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* METHOD GUARD                                                           */
+    /* ---------------------------------------------------------------------- */
+
     if (request.method !== "GET") {
       return json(
         {
@@ -166,6 +176,10 @@ export default {
         corsOrigin,
       );
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* BROWSER ORIGIN GUARD                                                   */
+    /* ---------------------------------------------------------------------- */
 
     if (
       request.headers.has("Origin") &&
@@ -179,21 +193,34 @@ export default {
       );
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* HEALTH                                                                 */
+    /* ---------------------------------------------------------------------- */
+
     if (url.pathname === "/health") {
       return json(
         {
           status: "ok",
           service:
             "WOWMAZING Research Gateway",
-          version: "0.4.0",
+          version: "0.5.0",
           upstream_enabled:
             env.RESEARCH_UPSTREAM_ENABLED ===
             "true",
+          backend_configured:
+            Boolean(
+              env.RESEARCH_BACKEND_URL?.trim() &&
+              env.RESEARCH_GATEWAY_KEY?.trim(),
+            ),
         },
         200,
         corsOrigin,
       );
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* RESEARCH ROUTE                                                         */
+    /* ---------------------------------------------------------------------- */
 
     if (url.pathname !== "/v1/research") {
       return json(
@@ -204,6 +231,10 @@ export default {
         corsOrigin,
       );
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* QUERY PARAMETERS                                                        */
+    /* ---------------------------------------------------------------------- */
 
     const source = url.searchParams
       .get("source")
@@ -222,6 +253,10 @@ export default {
     const limitValue =
       url.searchParams.get("limit");
 
+    /* ---------------------------------------------------------------------- */
+    /* SOURCE VALIDATION                                                       */
+    /* ---------------------------------------------------------------------- */
+
     if (
       !source ||
       !isSourceKey(source)
@@ -237,6 +272,10 @@ export default {
       );
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* SYMBOL VALIDATION                                                       */
+    /* ---------------------------------------------------------------------- */
+
     if (
       !symbol ||
       !isValidSymbol(symbol)
@@ -249,6 +288,10 @@ export default {
         corsOrigin,
       );
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* QUERY VALIDATION                                                        */
+    /* ---------------------------------------------------------------------- */
 
     if (
       query &&
@@ -265,6 +308,10 @@ export default {
       );
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* LIMIT VALIDATION                                                        */
+    /* ---------------------------------------------------------------------- */
+
     const limit =
       parseLimit(limitValue);
 
@@ -278,6 +325,10 @@ export default {
         corsOrigin,
       );
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* UPSTREAM ENABLEMENT                                                     */
+    /* ---------------------------------------------------------------------- */
 
     if (
       env.RESEARCH_UPSTREAM_ENABLED !==
@@ -293,6 +344,10 @@ export default {
       );
     }
 
+    /* ---------------------------------------------------------------------- */
+    /* RESEARCH DISPATCH                                                      */
+    /* ---------------------------------------------------------------------- */
+
     try {
       const items =
         await fetchResearch(
@@ -302,6 +357,7 @@ export default {
             query: query || null,
             limit,
           },
+          env,
         );
 
       return json(
@@ -318,6 +374,10 @@ export default {
         corsOrigin,
       );
     } catch (error) {
+      /* -------------------------------------------------------------------- */
+      /* EXPECTED GATEWAY ERRORS                                               */
+      /* -------------------------------------------------------------------- */
+
       if (
         error instanceof
         ResearchGatewayError
@@ -332,6 +392,10 @@ export default {
         );
       }
 
+      /* -------------------------------------------------------------------- */
+      /* UNEXPECTED ERROR                                                      */
+      /* -------------------------------------------------------------------- */
+
       return json(
         {
           error:
@@ -344,4 +408,4 @@ export default {
       );
     }
   },
-} satisfies ExportedHandler<Env>;
+};

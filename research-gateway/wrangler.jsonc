@@ -10,9 +10,10 @@
   "workers_dev": false,
 
   "vars": {
-    "RESEARCH_UPSTREAM_ENABLED": "true",
-    "CORS_ORIGINS": "https://market.wowmazingstudios.com"
-  },
+  "RESEARCH_UPSTREAM_ENABLED": "true",
+  "RESEARCH_BACKEND_URL": "https://wowmazing-market-agent-api.onrender.com",
+  "CORS_ORIGINS": "https://market.wowmazingstudios.com"
+},
 
   "routes": [
     {
