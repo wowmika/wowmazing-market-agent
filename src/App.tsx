@@ -34,6 +34,7 @@ import "./App.css";
 import "./responsive.css";
 import "./AgentTerminal.css";
 import { API_BASE_URL } from "./config";
+import { fetchNseResearch } from "./ai/retrieval/researchGateway";
 
 let localRuntimeLoaded = false;
 
@@ -1121,6 +1122,34 @@ function App() {
 
       void (async () => {
         try {
+          const researchSymbol =
+            typeof nextSnapshot.symbol === "string" && nextSnapshot.symbol.trim()
+              ? nextSnapshot.symbol.trim().replace(/\.(?:NS|BO)$/i, "")
+              : strategySymbol;
+
+          let research: Awaited<ReturnType<typeof fetchNseResearch>> = [];
+          const exchange = (instrumentMeta.exchange || "NSE").toUpperCase();
+          const shouldFetchNseResearch =
+            instrumentMeta.market === "INDIA" && exchange === "NSE";
+
+          if (shouldFetchNseResearch) {
+            try {
+              // Fetch a bounded recent NSE corpus without applying the user's
+              // full command as a server-side substring filter. The browser
+              // retrieval layer performs the semantic + lexical ranking.
+              research = await fetchNseResearch(
+                researchSymbol,
+                undefined,
+                8,
+              );
+            } catch (researchError) {
+              console.warn(
+                "WOWMAZING NSE research gateway unavailable; continuing with local evidence:",
+                researchError,
+              );
+            }
+          }
+
           const { createResearchRetriever } = await import("./ai/retrieval/researchRetriever");
           const retriever =
             await createResearchRetriever({
@@ -1130,6 +1159,7 @@ function App() {
               strategy_evidence: strategyEvidence
                 ? (strategyEvidence as unknown as Record<string, unknown>)
                 : null,
+              research,
             });
 
           const retrievedEvidence =
