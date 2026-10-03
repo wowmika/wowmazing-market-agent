@@ -11,6 +11,8 @@ services:
     healthCheckPath: /health
 
     envVars:
+      - key: RESEARCH_GATEWAY_KEY
+        sync: false
       - key: MARKET_DATA_PROVIDER
         value: "upstox"
 

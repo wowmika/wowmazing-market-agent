@@ -4,16 +4,21 @@ import json
 import math
 import os
 import re
+import secrets
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request as UrlRequest, urlopen
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -113,6 +118,21 @@ def configured_cors_origins() -> list[str]:
 
 
 CORS_ORIGINS = configured_cors_origins()
+
+RESEARCH_GATEWAY_KEY = os.getenv(
+    "RESEARCH_GATEWAY_KEY",
+    "",
+).strip()
+
+NSE_RESEARCH_TIMEOUT_SECONDS = 5
+NSE_RESEARCH_MAX_BYTES = 256 * 1024
+NSE_RESEARCH_MAX_ITEMS = 20
+NSE_RESEARCH_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/154.0.0.0 Safari/537.36"
+)
+NSE_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 
 # ============================================================
@@ -2287,6 +2307,332 @@ def health() -> dict[str, str]:
             if MARKET_DATA_PROVIDER != "yfinance"
             else "yfinance"
         ),
+    }
+
+
+# ============================================================
+# SERVER-TO-SERVER RESEARCH GATEWAY
+# ============================================================
+
+
+def _validate_research_symbol(symbol: str) -> str:
+    """Normalize and validate a symbol before it reaches NSE."""
+
+    normalized = symbol.strip().upper()
+
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail="NSE symbol is required.",
+        )
+
+    if len(normalized) > 32 or not re.fullmatch(
+        r"[A-Z0-9._-]+",
+        normalized,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid NSE symbol.",
+        )
+
+    return normalized
+
+
+def _nse_date_range() -> tuple[str, str]:
+    """Return the previous and current IST calendar dates in NSE format."""
+
+    now = datetime.now(NSE_TIMEZONE)
+    previous_day = now - timedelta(days=1)
+
+    return (
+        previous_day.strftime("%d-%m-%Y"),
+        now.strftime("%d-%m-%Y"),
+    )
+
+
+def _nse_request_url(
+    symbol: str,
+) -> str:
+    """Build the bounded NSE corporate-announcements request URL."""
+
+    from_date, to_date = _nse_date_range()
+
+    params = urlencode(
+        {
+            "index": "equities",
+            "from_date": from_date,
+            "to_date": to_date,
+            "symbol": symbol,
+        }
+    )
+
+    return (
+        "https://www.nseindia.com/api/"
+        f"corporate-announcements?{params}"
+    )
+
+
+def _normalize_nse_research(
+    payload: Any,
+    symbol: str,
+    query: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Convert the official NSE payload into the gateway research shape."""
+
+    if not isinstance(payload, list):
+        raise RuntimeError(
+            "NSE returned an unexpected response format."
+        )
+
+    normalized_query = (
+        query.strip().lower()
+        if query
+        else ""
+    )
+
+    items: list[dict[str, Any]] = []
+
+    for index, raw_item in enumerate(
+        payload[:NSE_RESEARCH_MAX_ITEMS]
+    ):
+        if not isinstance(raw_item, dict):
+            continue
+
+        title = str(
+            raw_item.get("desc")
+            or "NSE corporate announcement"
+        ).strip()
+
+        text = str(
+            raw_item.get("attchmntText")
+            or title
+        ).strip()
+
+        company = str(
+            raw_item.get("sm_name")
+            or ""
+        ).strip() or None
+
+        item_symbol = str(
+            raw_item.get("symbol")
+            or symbol
+        ).strip().upper() or symbol
+
+        published_at = str(
+            raw_item.get("sort_date")
+            or raw_item.get("an_dt")
+            or ""
+        ).strip() or None
+
+        attachment_url = str(
+            raw_item.get("attchmntFile")
+            or ""
+        ).strip()
+
+        if not attachment_url:
+            attachment_url = (
+                "https://www.nseindia.com/companies-listing/"
+                "corporate-filings-announcements"
+            )
+
+        if normalized_query:
+            haystack = " ".join(
+                [
+                    title,
+                    text,
+                    company or "",
+                    item_symbol,
+                ]
+            ).lower()
+
+            if normalized_query not in haystack:
+                continue
+
+        sequence_id = str(
+            raw_item.get("seq_id")
+            or ""
+        ).strip()
+
+        research_id = (
+            f"nse-{sequence_id}"
+            if sequence_id
+            else f"nse-{index + 1}"
+        )
+
+        items.append(
+            {
+                "id": research_id,
+                "title": title,
+                "source": "NSE",
+                "url": attachment_url,
+                "published_at": published_at,
+                "text": text,
+                "symbol": item_symbol,
+                "company": company,
+                "category": title,
+            }
+        )
+
+        if len(items) >= limit:
+            break
+
+    return items
+
+
+def _fetch_nse_research(
+    symbol: str,
+    query: str | None,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Fetch public NSE corporate announcements from the Render server."""
+
+    url = _nse_request_url(symbol)
+
+    request = UrlRequest(
+        url,
+        method="GET",
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-IN,en;q=0.9",
+            "User-Agent": NSE_RESEARCH_USER_AGENT,
+            "Referer": (
+                "https://www.nseindia.com/companies-listing/"
+                "corporate-filings-announcements"
+            ),
+        },
+    )
+
+    try:
+        with urlopen(
+            request,
+            timeout=NSE_RESEARCH_TIMEOUT_SECONDS,
+        ) as response:
+            content_length = response.headers.get(
+                "Content-Length"
+            )
+
+            if content_length:
+                try:
+                    if int(content_length) > NSE_RESEARCH_MAX_BYTES:
+                        raise RuntimeError(
+                            "NSE response exceeded the size limit."
+                        )
+                except ValueError:
+                    pass
+
+            raw_bytes = response.read(
+                NSE_RESEARCH_MAX_BYTES + 1
+            )
+
+            if len(raw_bytes) > NSE_RESEARCH_MAX_BYTES:
+                raise RuntimeError(
+                    "NSE response exceeded the size limit."
+                )
+
+    except HTTPError as error:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"NSE returned HTTP {error.code}."
+            ),
+        ) from error
+
+    except URLError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to reach NSE research upstream.",
+        ) from error
+
+    except TimeoutError as error:
+        raise HTTPException(
+            status_code=504,
+            detail="NSE research request timed out.",
+        ) from error
+
+    try:
+        payload = json.loads(
+            raw_bytes.decode("utf-8")
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HTTPException(
+            status_code=502,
+            detail="NSE returned invalid JSON.",
+        ) from error
+
+    return _normalize_nse_research(
+        payload,
+        symbol,
+        query,
+        limit,
+    )
+
+
+@app.get("/research/nse")
+def research_nse(
+    symbol: str = Query(
+        ...,
+        min_length=1,
+        max_length=32,
+    ),
+    query: str | None = Query(
+        default=None,
+        max_length=160,
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=20,
+    ),
+    research_gateway_key: str | None = Header(
+        default=None,
+        alias="X-Research-Gateway-Key",
+    ),
+) -> dict[str, Any]:
+    """Return bounded NSE research for the Cloudflare gateway.
+
+    Authentication is server-to-server via X-Research-Gateway-Key.
+    The secret is never accepted through a query parameter.
+    """
+
+    if not RESEARCH_GATEWAY_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "RESEARCH_GATEWAY_KEY is not configured."
+            ),
+        )
+
+    supplied_key = (
+        research_gateway_key or ""
+    ).strip()
+
+    if not supplied_key or not secrets.compare_digest(
+        supplied_key,
+        RESEARCH_GATEWAY_KEY,
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid research gateway credentials.",
+        )
+
+    normalized_symbol = _validate_research_symbol(
+        symbol
+    )
+
+    return {
+        "success": True,
+        "source": "nse",
+        "source_name": "NSE",
+        "symbol": normalized_symbol,
+        "count": len(
+            items := _fetch_nse_research(
+                normalized_symbol,
+                query,
+                limit,
+            )
+        ),
+        "items": items,
     }
 
 
