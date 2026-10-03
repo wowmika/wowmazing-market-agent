@@ -2339,13 +2339,18 @@ def _validate_research_symbol(symbol: str) -> str:
 
 
 def _nse_date_range() -> tuple[str, str]:
-    """Return the previous and current IST calendar dates in NSE format."""
+    """Return a recent 7-calendar-day IST window for NSE research.
+
+    The wider window intentionally spans weekends and exchange holidays so
+    the research feed does not appear empty when the previous calendar day
+    was not an NSE trading day.
+    """
 
     now = datetime.now(NSE_TIMEZONE)
-    previous_day = now - timedelta(days=1)
+    research_start = now - timedelta(days=7)
 
     return (
-        previous_day.strftime("%d-%m-%Y"),
+        research_start.strftime("%d-%m-%Y"),
         now.strftime("%d-%m-%Y"),
     )
 
